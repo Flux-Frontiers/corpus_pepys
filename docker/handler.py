@@ -113,6 +113,11 @@ print("[startup] initialising KGRAG orchestrator ...")
 from kg_rag.orchestrator import KGRAG  # noqa: E402
 
 _kgrag = KGRAG(registry_path=REGISTRY_PATH, embedder=_embedder)
+
+print("[startup] initialising DiaryKG for synthesis ...")
+from diary_kg.kg import DiaryKG  # noqa: E402
+
+_diarykg = DiaryKG(root=PEPYS_KG_ROOT, model=EMBED_MODEL)
 print("[startup] ready")
 
 
@@ -134,14 +139,20 @@ def _hit_to_dict(hit) -> dict:
     }
 
 
-def _synthesize(query: str, hits: list[dict]) -> str | None:
+def _synthesize(query: str, k: int) -> str | None:
     if not VLLM_ENDPOINT:
         return None
     import re
     import httpx
 
+    snippets = _diarykg.pack(query, k=k)
+    if not snippets:
+        return None
+
     ctx = "\n\n".join(
-        f"[{h['name']}]\n{h['summary']}" for h in hits if h.get("summary")
+        f"[{s.get('timestamp', '')[:10]}]\n{s.get('content', '')}"
+        for s in snippets
+        if s.get("content")
     )
     if not ctx:
         return None
@@ -214,7 +225,7 @@ def handler(job: dict) -> dict:
     )
 
     hits = [_hit_to_dict(h) for h in result.hits]
-    synthesis = _synthesize(query, hits) if synthesize else None
+    synthesis = _synthesize(query, k) if synthesize else None
 
     return {
         "query": query,
