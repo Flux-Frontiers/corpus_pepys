@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# © 2026 Eric G. Suchanek, PhD — Flux-Frontiers · SPDX-License-Identifier: Elastic-2.0
 """
 Samuel Pepys Diary Parser with Intelligent Time Inference
 
@@ -432,9 +433,7 @@ def main() -> int:
         default=True,
         help="Vary times (default: True)",
     )
-    parser.add_argument(
-        "--min-chars", type=int, default=30, help="Minimum content length to keep"
-    )
+    parser.add_argument("--min-chars", type=int, default=30, help="Minimum content length to keep")
     args = parser.parse_args()
 
     input_path = Path(args.input_path)
@@ -452,11 +451,7 @@ def main() -> int:
             if len(content) < args.min_chars:
                 continue
 
-            time_str = (
-                infer_time_from_content(content, entry_idx)
-                if args.vary_times
-                else "00:00"
-            )
+            time_str = infer_time_from_content(content, entry_idx) if args.vary_times else "00:00"
             ts = f"{entry_date.isoformat()}T{time_str}"
 
             # Format: timestamp | raw | DiaryText | content

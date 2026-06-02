@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# © 2026 Eric G. Suchanek, PhD — Flux-Frontiers · SPDX-License-Identifier: Elastic-2.0
 """
 Sentence Structure Analysis for Pepys Diary Corpus
 
@@ -91,8 +92,7 @@ def analyze_entry_lengths(entries: list[tuple[str, str]]) -> dict:
 
     sorted_lengths = sorted(lengths)
     percentiles = {
-        p: sorted_lengths[int(len(sorted_lengths) * p / 100)]
-        for p in [10, 25, 50, 75, 90, 95, 99]
+        p: sorted_lengths[int(len(sorted_lengths) * p / 100)] for p in [10, 25, 50, 75, 90, 95, 99]
     }
 
     return {
@@ -124,8 +124,7 @@ def analyze_sentences(entries: list[tuple[str, str]]) -> dict:
     sorted_lengths = sorted(sentence_lengths)
 
     percentiles = {
-        p: sorted_lengths[int(len(sorted_lengths) * p / 100)]
-        for p in [10, 25, 50, 75, 90, 95, 99]
+        p: sorted_lengths[int(len(sorted_lengths) * p / 100)] for p in [10, 25, 50, 75, 90, 95, 99]
     }
 
     # Distribution buckets
@@ -144,18 +143,14 @@ def analyze_sentences(entries: list[tuple[str, str]]) -> dict:
         distribution[label] = {
             "range": f"{low}-{high if high != float('inf') else '∞'}",
             "count": count,
-            "percentage": count / len(sentence_lengths) * 100
-            if sentence_lengths
-            else 0,
+            "percentage": count / len(sentence_lengths) * 100 if sentence_lengths else 0,
         }
 
     return {
         "total_sentences": len(all_sentences),
         "mean_length": statistics.mean(sentence_lengths) if sentence_lengths else 0,
         "median_length": statistics.median(sentence_lengths) if sentence_lengths else 0,
-        "stdev_length": statistics.stdev(sentence_lengths)
-        if len(sentence_lengths) > 1
-        else 0,
+        "stdev_length": statistics.stdev(sentence_lengths) if len(sentence_lengths) > 1 else 0,
         "min_length": min(sentence_lengths) if sentence_lengths else 0,
         "max_length": max(sentence_lengths) if sentence_lengths else 0,
         "percentiles": percentiles,
@@ -307,9 +302,7 @@ def display_distribution(stats: dict):
         visual_bar = "█" * bar_width
 
         label_text = label.replace("_", " ").title()
-        table.add_row(
-            f"{label_text} ({data['range']})", f"{count:,}", f"{pct:.1f}%", visual_bar
-        )
+        table.add_row(f"{label_text} ({data['range']})", f"{count:,}", f"{pct:.1f}%", visual_bar)
 
     console.print(table)
 
@@ -343,9 +336,7 @@ def display_recommendations(recommendations: dict):
         if "Recommended" in name:
             name = f"[bold green]{name}[/bold green]"
 
-        table.add_row(
-            name, f"{strategy['target_size']:,}", pros_cons, strategy["use_case"]
-        )
+        table.add_row(name, f"{strategy['target_size']:,}", pros_cons, strategy["use_case"])
 
     console.print(table)
 
@@ -372,9 +363,7 @@ def generate_markdown_report(
         f.write(f"- **Mean Length**: {entry_stats['mean']:.0f} chars\n")
         f.write(f"- **Median Length**: {entry_stats['median']:.0f} chars\n")
         f.write(f"- **Std Deviation**: {entry_stats['stdev']:.0f} chars\n")
-        f.write(
-            f"- **Range**: {entry_stats['min']:,} - {entry_stats['max']:,} chars\n\n"
-        )
+        f.write(f"- **Range**: {entry_stats['min']:,} - {entry_stats['max']:,} chars\n\n")
 
         f.write("### Percentiles\n\n")
         f.write("| Percentile | Length (chars) |\n")
@@ -451,19 +440,13 @@ def generate_markdown_report(
         very_long_pct = sentence_stats["distribution"]["very_long"]["percentage"]
         extreme_pct = sentence_stats["distribution"]["extreme"]["percentage"]
         problematic_pct = very_long_pct + extreme_pct
-        f.write(
-            f"2. **Problematic Sentences**: {problematic_pct:.1f}% exceed 400 chars\n"
-        )
+        f.write(f"2. **Problematic Sentences**: {problematic_pct:.1f}% exceed 400 chars\n")
         if problematic_pct < 2:
             f.write("   - Most sentences fit well within typical chunk sizes\n")
         elif problematic_pct < 5:
-            f.write(
-                "   - Small minority of very long sentences may need special handling\n"
-            )
+            f.write("   - Small minority of very long sentences may need special handling\n")
         else:
-            f.write(
-                "   - Significant number of very long sentences - consider pre-splitting\n"
-            )
+            f.write("   - Significant number of very long sentences - consider pre-splitting\n")
         f.write("\n")
 
         # Insight 3: Optimal grouping
@@ -471,9 +454,7 @@ def generate_markdown_report(
         sentences_per_chunk = target_size / sentence_stats["median_length"]
         f.write(f"3. **Optimal Grouping**: For {target_size}-char chunks\n")
         f.write(f"   - Aim for ~{sentences_per_chunk:.1f} sentences per chunk\n")
-        f.write(
-            "   - This preserves semantic coherence while maintaining consistent size\n"
-        )
+        f.write("   - This preserves semantic coherence while maintaining consistent size\n")
         f.write("\n")
 
         f.write("---\n")
@@ -495,9 +476,7 @@ def main():
         default="sentence_analysis_report.md",
         help="Output markdown report path",
     )
-    parser.add_argument(
-        "--sample", type=int, default=None, help="Analyze only first N entries"
-    )
+    parser.add_argument("--sample", type=int, default=None, help="Analyze only first N entries")
 
     args = parser.parse_args()
 

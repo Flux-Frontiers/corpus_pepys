@@ -1,3 +1,4 @@
+# © 2026 Eric G. Suchanek, PhD — Flux-Frontiers · SPDX-License-Identifier: Elastic-2.0
 """
 KGRAG handler — Pepys Diary corpus.
 
@@ -143,6 +144,7 @@ def _synthesize(query: str, k: int) -> str | None:
     if not VLLM_ENDPOINT:
         return None
     import re
+
     import httpx
 
     snippets = _diarykg.pack(query, k=k)

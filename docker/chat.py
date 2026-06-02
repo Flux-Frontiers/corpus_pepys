@@ -1,3 +1,4 @@
+# © 2026 Eric G. Suchanek, PhD — Flux-Frontiers · SPDX-License-Identifier: Elastic-2.0
 """
 chat.py — Samuel Pepys Diary Chat Interface
 
@@ -189,9 +190,7 @@ def _init_state() -> None:
 
 def _render_sidebar() -> dict:
     st.sidebar.title("📔 Pepys Diary")
-    st.sidebar.markdown(
-        "Samuel Pepys · London · 1660–1669  \n3,355 entries · 7,282 indexed chunks"
-    )
+    st.sidebar.markdown("Samuel Pepys · London · 1660–1669  \n3,355 entries · 7,282 indexed chunks")
     st.sidebar.markdown("---")
 
     st.sidebar.subheader("🔌 Worker")
@@ -317,9 +316,7 @@ def main() -> None:
     if prompt:
         with st.chat_message("user"):
             st.markdown(prompt)
-        st.session_state.messages.append(
-            {"role": "user", "content": prompt, "result": None}
-        )
+        st.session_state.messages.append({"role": "user", "content": prompt, "result": None})
 
         with st.chat_message("assistant"):
             with st.spinner("Searching the diary…"):

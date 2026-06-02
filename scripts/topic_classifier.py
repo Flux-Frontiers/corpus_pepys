@@ -1,3 +1,4 @@
+# © 2026 Eric G. Suchanek, PhD — Flux-Frontiers · SPDX-License-Identifier: Elastic-2.0
 """
 Topic Classifier Module
 
@@ -295,9 +296,7 @@ def main():
     parser.add_argument(
         "-d", "--demo", action="store_true", help="Run demo mode with example texts"
     )
-    parser.add_argument(
-        "text", nargs="*", help="Text to classify (if not using demo mode)"
-    )
+    parser.add_argument("text", nargs="*", help="Text to classify (if not using demo mode)")
 
     args = parser.parse_args()
 
