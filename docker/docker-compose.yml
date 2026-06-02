@@ -1,0 +1,47 @@
+# corpus_pepys — local dev compose
+#
+# Usage (fast path — index already baked into image):
+#   docker compose up
+#
+# Usage (bind-mount for index development):
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+#
+# Query:
+#   curl -s -X POST http://localhost:8000/runsync \
+#     -H "Content-Type: application/json" \
+#     -d '{"input":{"query":"Great Fire of London","corpus":"pepys","k":5}}' | jq .
+
+services:
+  pepys-worker:
+    image: corpus-pepys:latest
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    command: python handler.py --rp_serve_api --rp_api_host 0.0.0.0
+    ports:
+      - "8000:8000"
+    environment:
+      PEPYS_KG_ROOT: /workspace/pepys
+      EMBED_MODEL: BAAI/bge-small-en-v1.5
+      HANDLER_SECRET: ${HANDLER_SECRET:-}
+      # Synthesis via Ollama on the host (optional — omit to disable)
+      VLLM_ENDPOINT_URL: ${VLLM_ENDPOINT_URL:-http://host.docker.internal:11434}
+      VLLM_MODEL: ${VLLM_MODEL:-qwen3:4b}
+      RUNPOD_API_KEY: ${RUNPOD_API_KEY:-ollama}
+    restart: unless-stopped
+
+  # Optional Streamlit chat UI — matches kgrag/local/chat.py interface
+  pepys-chat:
+    image: corpus-pepys:latest
+    command: >
+      streamlit run /app/chat.py
+      --server.port 8501
+      --server.address 0.0.0.0
+    ports:
+      - "8501:8501"
+    environment:
+      KGRAG_ENDPOINT: http://pepys-worker:8000
+    depends_on:
+      - pepys-worker
+    profiles:
+      - chat
