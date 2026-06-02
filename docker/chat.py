@@ -163,9 +163,23 @@ def _query_worker(
 # ---------------------------------------------------------------------------
 
 
+_SUGGESTED_QUERIES: list[str] = [
+    "What did Pepys witness during the Great Fire of London?",
+    "How did the plague affect daily life in London?",
+    "Describe Pepys' work at the Navy Office",
+    "What music did Pepys enjoy and perform?",
+    "How did Pepys describe King Charles II at court?",
+    "What were Pepys' favourite theatres and plays?",
+    "How did Pepys manage his household finances?",
+    "What was the Dutch War like from Pepys' perspective?",
+]
+
+
 def _init_state() -> None:
     if "messages" not in st.session_state:
         st.session_state.messages = []
+    if "pending_query" not in st.session_state:
+        st.session_state.pending_query = ""
 
 
 # ---------------------------------------------------------------------------
@@ -218,6 +232,12 @@ def _render_sidebar() -> dict:
         value=False,
         help="Generate a narrative answer via Ollama (requires VLLM_ENDPOINT_URL in worker)",
     )
+
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("💡 Try asking")
+    for q in _SUGGESTED_QUERIES:
+        if st.sidebar.button(q, use_container_width=True, key=f"sq_{q[:30]}"):
+            st.session_state.pending_query = q
 
     st.sidebar.markdown("---")
     if st.sidebar.button("🗑️ Clear chat", use_container_width=True):
@@ -290,7 +310,11 @@ def main() -> None:
             else:
                 _render_assistant_turn(msg["result"])
 
-    if prompt := st.chat_input("Ask about Pepys' world…"):
+    prompt = st.chat_input("Ask about Pepys' world…")
+    if not prompt and st.session_state.pending_query:
+        prompt = st.session_state.pending_query
+        st.session_state.pending_query = ""
+    if prompt:
         with st.chat_message("user"):
             st.markdown(prompt)
         st.session_state.messages.append(
