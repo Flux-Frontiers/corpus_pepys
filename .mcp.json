@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "pepys": {
+      "command": "/Users/egs/.local/bin/diarykg-mcp",
+      "args": [
+        "--repo", "/Users/egs/repos/corpus_pepys"
+      ]
+    }
+  }
+}
