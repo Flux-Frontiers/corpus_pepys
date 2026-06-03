@@ -3,7 +3,7 @@
 [![Version](https://img.shields.io/badge/version-0.1.1-blue.svg)](https://github.com/Flux-Frontiers/corpus_pepys/releases)
 [![Docker](https://img.shields.io/docker/v/egsuchanek/corpus-pepys?label=Docker%20Hub&color=2496ED)](https://hub.docker.com/r/egsuchanek/corpus-pepys)
 [![Poetry](https://img.shields.io/endpoint?url=https://python-poetry.org/badge/v0.json)](https://python-poetry.org/)
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.XXXXXXX.svg)](https://doi.org/10.5281/zenodo.XXXXXXX)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20531929.svg)](https://doi.org/10.5281/zenodo.20531929)
 
 # corpus_pepys
 
@@ -138,13 +138,11 @@ If you use this corpus or dataset in your research, please cite:
                Interactive Semantic Knowledge Graph},
   year      = {2026},
   publisher = {Zenodo},
-  version   = {v0.1.0},
-  doi       = {10.5281/zenodo.XXXXXXX},
-  url       = {https://doi.org/10.5281/zenodo.XXXXXXX}
+  version   = {v0.1.1},
+  doi       = {10.5281/zenodo.20531929},
+  url       = {https://doi.org/10.5281/zenodo.20531929}
 }
 ```
-
-> **Note:** Replace `XXXXXXX` with the actual Zenodo record ID once deposited.
 
 ---
 
