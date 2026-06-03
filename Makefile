@@ -1,8 +1,9 @@
-.PHONY: help build-corpus build-index reindex build-image run stop chat query clean
+.PHONY: help build-corpus build-index reindex build-image run stop chat query serve-llm clean
 
 CORPUS_SOURCE ?= data/pepys_enriched_full.txt
 IMAGE_NAME    ?= corpus-pepys
 QUERY         ?= Great Fire of London
+OMLX_PORT     ?= 8080
 
 help:
 	@echo "corpus_pepys — Samuel Pepys DiaryKG"
@@ -15,6 +16,7 @@ help:
 	@echo "  make stop           Stop the service"
 	@echo "  make chat           Launch Streamlit chat UI (worker must be running)"
 	@echo "  make query          Fire a test query (set QUERY='...' to override)"
+	@echo "  make serve-llm      Start oMLX synthesis backend on http://localhost:$(OMLX_PORT)"
 	@echo "  make clean          Remove generated index and image"
 
 # ------------------------------------------------------------------
@@ -89,6 +91,17 @@ query:
 	curl -s -X POST http://localhost:8000/runsync \
 		-H "Content-Type: application/json" \
 		-d '{"input":{"query":"$(QUERY)","corpus":"pepys","k":5}}' | python3 -m json.tool
+
+# ------------------------------------------------------------------
+# Optional LLM synthesis backend — oMLX (Apple Silicon, OpenAI-compatible).
+# Runs on :$(OMLX_PORT) (8000 is taken by the worker). Uses oMLX's own
+# persisted model directory; override with OMLX_PORT=... if needed.
+# Point docker/.env at it: VLLM_ENDPOINT_URL=http://host.docker.internal:$(OMLX_PORT)
+# ------------------------------------------------------------------
+serve-llm:
+	@command -v omlx >/dev/null 2>&1 || (echo "ERROR: omlx not found — install from https://omlx.ai" && exit 1)
+	@echo "Starting oMLX synthesis backend on http://localhost:$(OMLX_PORT) ..."
+	omlx serve --port $(OMLX_PORT)
 
 # ------------------------------------------------------------------
 # Cleanup

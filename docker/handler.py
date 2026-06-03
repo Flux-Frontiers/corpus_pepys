@@ -19,8 +19,8 @@ Environment variables
 ---------------------
 EMBED_MODEL       Sentence-transformer model ID.  Default: BAAI/bge-small-en-v1.5
 HANDLER_SECRET    Optional shared secret.  Requests must include {"secret": "<value>"}.
-VLLM_ENDPOINT_URL Optional: Ollama / vLLM endpoint base URL for synthesis.
-RUNPOD_API_KEY    Auth token for vLLM endpoint (set "ollama" for local Ollama).
+VLLM_ENDPOINT_URL Optional: OpenAI-compatible endpoint base URL for synthesis (oMLX, Ollama, vLLM).
+VLLM_API_KEY      Optional: Bearer token for the synthesis endpoint.  Omit for Ollama.
 VLLM_MODEL        Model ID.  Default: qwen3:4b
 
 Request schema
@@ -52,7 +52,7 @@ import runpod
 PEPYS_KG_ROOT = Path(os.environ.get("PEPYS_KG_ROOT", "/workspace/pepys"))
 REGISTRY_PATH = Path("/tmp/pepys_worker/registry.sqlite")
 VLLM_ENDPOINT = os.environ.get("VLLM_ENDPOINT_URL", "")
-RUNPOD_API_KEY = os.environ.get("RUNPOD_API_KEY", "ollama")
+VLLM_API_KEY = os.environ.get("VLLM_API_KEY", "")
 VLLM_MODEL = os.environ.get("VLLM_MODEL", "qwen3:4b")
 EMBED_MODEL = os.environ.get("EMBED_MODEL", "BAAI/bge-small-en-v1.5")
 HANDLER_SECRET = os.environ.get("HANDLER_SECRET", "")
@@ -159,9 +159,10 @@ def _synthesize(query: str, k: int) -> str | None:
     if not ctx:
         return None
 
+    headers = {"Authorization": f"Bearer {VLLM_API_KEY}"} if VLLM_API_KEY else {}
     resp = httpx.post(
         f"{VLLM_ENDPOINT}/v1/chat/completions",
-        headers={"Authorization": f"Bearer {RUNPOD_API_KEY}"},
+        headers=headers,
         json={
             "model": VLLM_MODEL,
             "think": False,  # disable qwen3 reasoning mode — keeps response clean

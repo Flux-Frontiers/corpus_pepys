@@ -17,12 +17,32 @@
 
 ---
 
-A standalone, queryable knowledge graph of Samuel Pepys' complete diary (1660–1669),
+## Who was Samuel Pepys?
+
+Samuel Pepys (1633–1703) was a London administrator who rose from tailor's son to
+Chief Secretary of the Admiralty, reforming the Royal Navy along the way. But he is
+remembered for something he never meant to publish: a private diary kept in
+shorthand cipher from 1660 to 1669, decoded only in the 19th century.
+
+For nine years Pepys wrote down everything — affairs of state and affairs of the
+heart, the price of a periwig and the terror of plague carts, quarrels with his
+wife, nights at the theatre, the taste of his first cup of tea. He recorded the
+Restoration of Charles II, fled the Great Plague of 1665, and watched the Great Fire
+of 1666 consume his city from a boat on the Thames, burying his wine and his
+parmesan cheese in the garden as the flames drew near.
+
+His unflinching candour — vain, curious, ambitious, and entirely human — makes him
+one of the greatest diarists in the English language, and his diary the single most
+vivid first-hand window into Restoration London.
+
+---
+
+This repository turns that diary into a **standalone, queryable knowledge graph**,
 built with [DiaryKG](https://github.com/Flux-Frontiers/diary_kg) and served via the
 [KGRAG](https://github.com/Flux-Frontiers/kgrag) federated query layer.
 
-Query 9 years of 17th-century London history — the Great Plague, the Great Fire,
-the Restoration court — with natural language, locally, in under a second.
+Query nine years of 17th-century London — the Great Plague, the Great Fire, the
+Restoration court — with natural language, locally, in under a second.
 No index to build. No model to download. Just pull and run.
 
 ---
@@ -36,97 +56,31 @@ docker pull egsuchanek/corpus-pepys:latest
 docker run -p 8000:8000 egsuchanek/corpus-pepys:latest
 ```
 
-Or with the repo cloned:
+Or, with the repo cloned, simply:
 
 ```bash
 make run
 ```
 
-The KGRAG worker starts on `http://localhost:8000`. The index is baked into
-the image — no volumes, no setup.
+The worker starts on `http://localhost:8000`. The diary index is baked into the
+image — no volumes, no model download, no setup.
 
-### 2. Query it
-
-```bash
-curl -s -X POST http://localhost:8000/runsync \
-  -H "Content-Type: application/json" \
-  -d '{"input":{"query":"Great Fire of London","corpus":"pepys","k":5}}' | jq .
-```
-
-Or with the Makefile shorthand:
-
-```bash
-make query QUERY="Great Fire of London"
-```
-
-### 3. Chat UI
+### 2. Open the chat app
 
 ```bash
 make chat
 ```
 
-Opens the Streamlit chat interface at `http://localhost:8501`. The worker
-must be running first (`make run`).
+This opens the **Pepys chat app** in your browser at `http://localhost:8501` — the
+easiest way to explore the diary. Ask questions in plain English and read the entries
+that answer them; no command line required.
 
----
+→ **[Read the User Guide](docs/USER_GUIDE.md)** for a full walkthrough.
 
-## API reference
-
-**Endpoint:** `POST http://localhost:8000/runsync`
-
-```json
-{
-  "input": {
-    "query":          "string  — required",
-    "corpus":         "pepys | all  (default: all)",
-    "k":              8,
-    "min_score":      0.0,
-    "semantic_floor": 0.0,
-    "synthesize":     false
-  }
-}
-```
-
-**Response:**
-
-```json
-{
-  "query": "Great Fire of London",
-  "corpus": "pepys",
-  "total_hits": 8,
-  "hits": [
-    {
-      "node_id": "chunk:entry_4690_chunk_0.md:0002",
-      "name": "...",
-      "score": 0.7292,
-      "summary": "...",
-      "source_path": "..."
-    }
-  ],
-  "synthesis": null
-}
-```
-
----
-
-## LLM synthesis via Ollama
-
-Set `"synthesize": true` to get a generated answer grounded in the retrieved
-passages. Requires a running [Ollama](https://ollama.com) instance on the host.
-
-```bash
-cp docker/.env.example docker/.env
-# edit VLLM_ENDPOINT_URL and VLLM_MODEL (default: qwen3:4b)
-make run
-```
-
-Then:
-
-```bash
-curl -s -X POST http://localhost:8000/runsync \
-  -H "Content-Type: application/json" \
-  -d '{"input":{"query":"What did Pepys think of the navy?","synthesize":true,"k":6}}' | jq .
-```
+<p align="center">
+  <em>Prefer to script it? The service also speaks HTTP — see the
+  <a href="docs/API.md">API Reference</a>.</em>
+</p>
 
 ---
 
@@ -138,7 +92,7 @@ curl -s -X POST http://localhost:8000/runsync \
 | `data/pepys_enriched_full.txt` | 7,282 semantically enriched, topic-classified chunks |
 | `config/` | Topic classification YAML — 30+ Pepys-specific categories |
 | `docker/` | Dockerfile, handler, docker-compose, and Streamlit chat UI |
-| `docs/` | Technical articles and build instructions |
+| `docs/` | User guide, API reference, and build instructions |
 | `analysis/` | Run summaries with corpus statistics |
 | `scripts/` | Source processing scripts (parse, classify, analyse) |
 
@@ -161,10 +115,11 @@ of the Royal Navy.
 
 ---
 
-## Technical background
+## Documentation
 
-See the [docs/](docs/) directory for full technical write-ups:
-
+- **[User Guide](docs/USER_GUIDE.md)** — how to explore the diary with the chat app.
+- **[API Reference](docs/API.md)** — HTTP endpoint, parameters, and LLM synthesis
+  for scripting and integration.
 - **[Building from Source](docs/BUILDING.md)** — rebuilding the index, Docker
   image, or enriched corpus from scratch.
 - **[DiaryKG](https://github.com/Flux-Frontiers/diary_kg)** — the underlying knowledge

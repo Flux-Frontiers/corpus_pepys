@@ -49,7 +49,7 @@ ruff = ">=0.4.0"
 # ---------------------------------------------------------------------------
 [project]
 name = "corpus-pepys"
-version = "0.1.0"
+version = "0.1.1"
 description = "Samuel Pepys Diary — interactive semantic knowledge graph and KGRAG corpus"
 readme = "README.md"
 license = "Elastic-2.0"
