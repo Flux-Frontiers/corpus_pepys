@@ -5,6 +5,26 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.2.0] — 2026-06-05
+
+### Added
+- `docker/chat.py`, `docker/handler.py`: in-app **model picker** — the chat sidebar shows a dropdown of synthesis models pulled live from the worker (`{"op": "models"}` → the backend's `/v1/models`), and the chosen model is sent per-request via a new `model` override. The assistant turn shows which model produced the answer. Switch models with no restart or config edit
+- `docker/handler.py`: `SYNTH_MAX_K` environment variable (default 12) — caps the number of diary snippets fed to LLM synthesis so a large display-`k` can't overflow the model's context window (Ollama defaults to `num_ctx=4096`; oMLX/vLLM are larger but finite). Retrieval/display `k` is unaffected
+- `docker/handler.py`: `chat_template_kwargs.enable_thinking=false` is now sent alongside `think:false` to suppress Qwen3 reasoning where the backend supports it — oMLX/vLLM honour `chat_template_kwargs`, Ollama honours `think`; each ignores the field it doesn't recognise (the `<think>` strip remains a backstop). On hybrid *thinking* models this toggle is only best-effort, which is why the default model is a non-thinking Instruct variant (see below)
+- `.secrets.baseline`: detect-secrets baseline (the pre-commit hook referenced it but the file was missing)
+
+### Changed
+- Synthesis backend default model is now `Qwen3-30B-A3B-Instruct-2507-MLX-4bit` (`docker/handler.py`, `docker/.env.example`, `docker/docker-compose.yml`), replacing `Qwen3-4B-Instruct-2507-MLX-8bit` — a larger MoE for higher-quality answers, and a non-thinking Instruct model so reasoning traces never leak into the response
+- `docker/chat.py`: "Results" slider maximum raised from 20 to 50
+- `.pre-commit-config.yaml`: `mypy` hook retargeted from the nonexistent `src/` to `docker/` (repo has no `src/` layout)
+- `.gitignore`: removed unneeded entries (cleanup)
+
+### Removed
+- `.pre-commit-config.yaml`: `pytest` hook (project has no test suite) and `pylint` hook (not installed, no config, redundant with ruff)
+- `analysis/pepys_enriched_full_run_summary.md`, `analysis/pepys_enriched_full_mpnet_embeddings_run_summary.md`: stale run summaries (cleanup)
+
+---
+
 ## [0.1.1] — 2026-06-03
 
 ### Added

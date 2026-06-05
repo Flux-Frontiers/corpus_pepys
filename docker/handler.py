@@ -21,7 +21,8 @@ EMBED_MODEL       Sentence-transformer model ID.  Default: BAAI/bge-small-en-v1.
 HANDLER_SECRET    Optional shared secret.  Requests must include {"secret": "<value>"}.
 VLLM_ENDPOINT_URL Optional: OpenAI-compatible endpoint base URL for synthesis (oMLX, Ollama, vLLM).
 VLLM_API_KEY      Optional: Bearer token for the synthesis endpoint.  Omit for Ollama.
-VLLM_MODEL        Model ID.  Default: qwen3:4b
+VLLM_MODEL        Model ID.  Default: Qwen3-30B-A3B-Instruct-2507-MLX-4bit (must match a served oMLX model_id)
+SYNTH_MAX_K       Max snippets fed to synthesis (guards LLM ctx window).  Default: 12
 
 Request schema
 --------------
@@ -33,6 +34,8 @@ Request schema
   "min_score":      float — drop hits below this score  (default: 0.0)
   "semantic_floor": float — discard KG if best hit is below this  (default: 0.0)
   "synthesize":     bool  — call vLLM for a generated answer  (default: false)
+  "model":          str   — override VLLM_MODEL for this request  (default: VLLM_MODEL)
+  "op":             str   — "models" returns {"models": [...], "default": ...} and ignores the above
 }
 """
 
@@ -53,7 +56,11 @@ PEPYS_KG_ROOT = Path(os.environ.get("PEPYS_KG_ROOT", "/workspace/pepys"))
 REGISTRY_PATH = Path("/tmp/pepys_worker/registry.sqlite")
 VLLM_ENDPOINT = os.environ.get("VLLM_ENDPOINT_URL", "")
 VLLM_API_KEY = os.environ.get("VLLM_API_KEY", "")
-VLLM_MODEL = os.environ.get("VLLM_MODEL", "qwen3:4b")
+VLLM_MODEL = os.environ.get("VLLM_MODEL", "Qwen3-30B-A3B-Instruct-2507-MLX-4bit")
+# Cap snippets fed to synthesis so a large display-k can't overflow the LLM
+# context window (Ollama defaults to num_ctx=4096; oMLX/vLLM are larger but
+# still finite). Retrieval/display k is unaffected.
+SYNTH_MAX_K = int(os.environ.get("SYNTH_MAX_K", "12"))
 EMBED_MODEL = os.environ.get("EMBED_MODEL", "BAAI/bge-small-en-v1.5")
 HANDLER_SECRET = os.environ.get("HANDLER_SECRET", "")
 
@@ -140,14 +147,33 @@ def _hit_to_dict(hit) -> dict:
     }
 
 
-def _synthesize(query: str, k: int) -> str | None:
+def _list_models() -> list[str]:
+    """Return the model IDs the synthesis backend currently serves (empty if none)."""
+    if not VLLM_ENDPOINT:
+        return []
+    import httpx
+
+    headers = {"Authorization": f"Bearer {VLLM_API_KEY}"} if VLLM_API_KEY else {}
+    try:
+        resp = httpx.get(
+            f"{VLLM_ENDPOINT}/v1/models",
+            headers=headers,
+            timeout=httpx.Timeout(connect=5.0, read=15.0, write=5.0, pool=5.0),
+        )
+        resp.raise_for_status()
+        return [m["id"] for m in resp.json().get("data", []) if m.get("id")]
+    except Exception:  # pylint: disable=broad-exception-caught
+        return []
+
+
+def _synthesize(query: str, k: int, model: str | None = None) -> str | None:
     if not VLLM_ENDPOINT:
         return None
     import re
 
     import httpx
 
-    snippets = _diarykg.pack(query, k=k)
+    snippets = _diarykg.pack(query, k=min(k, SYNTH_MAX_K))
     if not snippets:
         return None
 
@@ -164,8 +190,13 @@ def _synthesize(query: str, k: int) -> str | None:
         f"{VLLM_ENDPOINT}/v1/chat/completions",
         headers=headers,
         json={
-            "model": VLLM_MODEL,
-            "think": False,  # disable qwen3 reasoning mode — keeps response clean
+            "model": model or VLLM_MODEL,
+            # Disable Qwen3 reasoning so the answer isn't polluted with chain-of-
+            # thought. Backends differ: Ollama honours "think"; oMLX/vLLM honour
+            # "chat_template_kwargs.enable_thinking". Send both; each ignores the
+            # field it doesn't recognise. (<think> stripping below is a backstop.)
+            "think": False,
+            "chat_template_kwargs": {"enable_thinking": False},
             "messages": [
                 {
                     "role": "system",
@@ -202,12 +233,18 @@ def handler(job: dict) -> dict:
     if HANDLER_SECRET and inp.get("secret") != HANDLER_SECRET:
         return {"error": "unauthorized"}
 
+    # Lightweight op: list the synthesis models currently served, so the chat UI
+    # can populate a model picker. Returns the configured default too.
+    if inp.get("op") == "models":
+        return {"models": _list_models(), "default": VLLM_MODEL}
+
     query = inp.get("query", "").strip()
     corpus = inp.get("corpus", "all")
     k = max(1, int(inp.get("k", 8)))
     min_score = float(inp.get("min_score", 0.0))
     semantic_floor = float(inp.get("semantic_floor", 0.0))
     synthesize = bool(inp.get("synthesize", False))
+    model = (inp.get("model") or "").strip() or None
 
     if not query:
         return {"error": "query is required"}
@@ -228,7 +265,7 @@ def handler(job: dict) -> dict:
     )
 
     hits = [_hit_to_dict(h) for h in result.hits]
-    synthesis = _synthesize(query, k) if synthesize else None
+    synthesis = _synthesize(query, k, model) if synthesize else None
 
     return {
         "query": query,
@@ -237,6 +274,7 @@ def handler(job: dict) -> dict:
         "kgs_queried": result.kgs_queried,
         "hits": hits,
         "synthesis": synthesis,
+        "model": (model or VLLM_MODEL) if synthesize else None,
     }
 
 

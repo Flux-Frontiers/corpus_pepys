@@ -128,6 +128,7 @@ def _query_worker(
     semantic_floor: float,
     synthesize: bool,
     secret: str,
+    model: str = "",
 ) -> dict:
     payload: dict = {
         "input": {
@@ -139,6 +140,8 @@ def _query_worker(
             "synthesize": synthesize,
         }
     }
+    if model:
+        payload["input"]["model"] = model
     if secret:
         payload["input"]["secret"] = secret
 
@@ -157,6 +160,25 @@ def _query_worker(
         raise WorkerError(f"{err_type}: {err_msg}")
 
     return data.get("output", data)
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _fetch_models(worker_url: str, secret: str) -> tuple[list[str], str]:
+    """Ask the worker which synthesis models are served. Returns (model_ids, default)."""
+    payload: dict = {"input": {"op": "models"}}
+    if secret:
+        payload["input"]["secret"] = secret
+    try:
+        resp = httpx.post(
+            worker_url.rstrip("/") + "/runsync",
+            json=payload,
+            timeout=httpx.Timeout(connect=5.0, read=20.0, write=5.0, pool=5.0),
+        )
+        resp.raise_for_status()
+        out = resp.json().get("output", {})
+        return out.get("models", []), out.get("default", "")
+    except Exception:  # pylint: disable=broad-exception-caught
+        return [], ""
 
 
 # ---------------------------------------------------------------------------
@@ -209,7 +231,7 @@ def _render_sidebar() -> dict:
     st.sidebar.markdown("---")
     st.sidebar.subheader("⚙️ Search")
 
-    k = st.sidebar.slider("Results", min_value=1, max_value=20, value=8)
+    k = st.sidebar.slider("Results", min_value=1, max_value=50, value=8)
     min_score = st.sidebar.slider(
         "Min score",
         min_value=0.0,
@@ -232,6 +254,23 @@ def _render_sidebar() -> dict:
         help="Generate a narrative answer via Ollama (requires VLLM_ENDPOINT_URL in worker)",
     )
 
+    model = ""
+    if synthesize:
+        models, default = _fetch_models(worker_url, secret)
+        if models:
+            default_idx = models.index(default) if default in models else 0
+            model = st.sidebar.selectbox(
+                "Model",
+                options=models,
+                index=default_idx,
+                help="Synthesis model — pulled live from the worker's LLM backend",
+            )
+        else:
+            st.sidebar.caption("⚠️ No models reported — using the worker's default.")
+        if st.sidebar.button("🔄 Refresh models", use_container_width=True):
+            _fetch_models.clear()
+            st.rerun()
+
     st.sidebar.markdown("---")
     st.sidebar.subheader("💡 Try asking")
     for q in _SUGGESTED_QUERIES:
@@ -250,6 +289,7 @@ def _render_sidebar() -> dict:
         "min_score": min_score,
         "semantic_floor": semantic_floor,
         "synthesize": synthesize,
+        "model": model,
     }
 
 
@@ -272,6 +312,9 @@ def _render_assistant_turn(result: dict) -> None:
 
     if synthesis:
         st.markdown(synthesis)
+        model = result.get("model")
+        if model:
+            st.caption(f"🤖 {model}")
     elif synthesis_error:
         st.warning(
             f"Answer generation failed — **{synthesis_error}**\n\n"
@@ -329,6 +372,7 @@ def main() -> None:
                         semantic_floor=cfg["semantic_floor"],
                         synthesize=cfg["synthesize"],
                         secret=cfg["secret"],
+                        model=cfg["model"],
                     )
                 except httpx.ConnectError:
                     st.error(
