@@ -33,9 +33,9 @@ repos:
 
   - repo: local
     hooks:
-      - id: mypy
-        name: mypy
-        entry: poetry run mypy docker/
+      - id: ty
+        name: ty
+        entry: poetry run ty check docker/
         language: system
         pass_filenames: false
         always_run: true

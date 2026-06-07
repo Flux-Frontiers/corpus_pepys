@@ -15,8 +15,56 @@ The worker must be running first:
 
 from __future__ import annotations
 
+import html
+import io
+import json
+import os
+from pathlib import Path
+
 import httpx
 import streamlit as st
+
+_IN_DOCKER = os.path.exists("/.dockerenv")
+_HOST = "host.docker.internal" if _IN_DOCKER else "localhost"
+
+_DEFAULT_WORKER = os.environ.get("KGRAG_ENDPOINT", "http://localhost:8000")
+_DEFAULT_IMAGE_SERVER = os.environ.get("IMAGE_ENDPOINT", f"http://{_HOST}:8090")
+_DEFAULT_IMAGE_MODEL = os.environ.get("GUTENKG_IMAGE_MODEL", "flux2-klein-4b")
+_DEFAULT_VLM_ENDPOINT = os.environ.get("GUTENKG_VLM_ENDPOINT", f"http://{_HOST}:8080/v1")
+_DEFAULT_IMAGE_STEPS = int(os.environ.get("IMAGE_STEPS", "4"))
+
+_RESOLUTION_SIZES: dict[str, dict[str, str]] = {
+    "Preview": {
+        "3:2": "768x512",
+        "16:9": "768x432",
+        "1:1": "512x512",
+        "4:3": "680x512",
+        "9:16": "432x768",
+        "2:3": "512x768",
+    },
+    "Standard": {
+        "3:2": "1152x768",
+        "16:9": "1152x648",
+        "1:1": "768x768",
+        "4:3": "1024x768",
+        "9:16": "648x1152",
+        "2:3": "768x1152",
+    },
+    "Full": {
+        "3:2": "1536x1024",
+        "16:9": "1536x864",
+        "1:1": "1024x1024",
+        "4:3": "1365x1024",
+        "9:16": "864x1536",
+        "2:3": "1024x1536",
+    },
+}
+
+_RESOLUTION_LABELS: dict[str, str] = {
+    "Preview": "Preview  (768 × 512)",
+    "Standard": "Standard  (1152 × 768)",
+    "Full": "Full  (1536 × 1024)",
+}
 
 # ---------------------------------------------------------------------------
 # Page config
@@ -80,18 +128,39 @@ def _score_bar(score: float, width: int = 80) -> str:
     )
 
 
+def _preview(text: str, n: int = 200) -> tuple[str, bool]:
+    """Return (preview, truncated) — a clean ~n-char preview cut on a word boundary."""
+    text = (text or "").strip()
+    if len(text) <= n:
+        return text, False
+    cut = text[:n].rsplit(" ", 1)[0].rstrip(" ,;:—-")
+    return cut + "…", True
+
+
 def _render_hit_card(hit: dict) -> None:
     node_kind = hit.get("kind", "")
     name = hit.get("name", "")
     source = hit.get("source_path") or "—"
     score = float(hit.get("score", 0.0))
-    summary = hit.get("summary") or ""
-    summary_short = summary[:200] + ("…" if len(summary) > 200 else "")
+    # Show the real diary passage (content), falling back to the legacy summary.
+    content = hit.get("content") or hit.get("summary") or ""
+    preview, truncated = _preview(content, 200)
+
+    esc_preview = html.escape(preview)
+    details = ""
+    if truncated:
+        esc_full = html.escape(content).replace("\n", "<br>")
+        details = (
+            "<details style='margin-top:6px;'>"
+            "<summary style='cursor:pointer;color:#D4A017;font-size:12px;'>📖 Full entry</summary>"
+            f"<div style='color:#ddd;font-size:13px;margin-top:6px;line-height:1.55;'>{esc_full}</div>"
+            "</details>"
+        )
 
     st.markdown(
         f"""
         <div style="background:#1e1e2e;border-left:4px solid {_DIARY_COLOR};
-                    border-radius:6px;padding:10px 14px;margin-bottom:8px;">
+                    border-radius:6px;padding:10px 14px;margin-bottom:6px;">
           <span style='background:{_DIARY_COLOR};color:#fff;border-radius:4px;
                 padding:2px 9px;font-size:11px;font-weight:bold;font-family:monospace;'>
             📔 diary</span>
@@ -103,7 +172,8 @@ def _render_hit_card(hit: dict) -> None:
           <span style="color:#888;font-size:11px;font-family:monospace;">📄 {source}</span>
           &nbsp;&nbsp;
           {_score_bar(score)}
-          {"<br><span style='color:#ccc;font-size:12px;'>" + summary_short + "</span>" if summary_short else ""}
+          {"<br><span style='color:#ccc;font-size:12px;'>" + esc_preview + "</span>" if esc_preview else ""}
+          {details}
         </div>
         """,
         unsafe_allow_html=True,
@@ -133,7 +203,7 @@ def _query_worker(
     payload: dict = {
         "input": {
             "query": query,
-            "corpus": "pepys",
+            "corpus": "diary",
             "k": k,
             "min_score": min_score,
             "semantic_floor": semantic_floor,
@@ -155,11 +225,23 @@ def _query_worker(
 
     if data.get("status") == "FAILED" or "error_type" in data:
         error_data = data.get("error", data)
-        err_type = error_data.get("error_type", "Unknown")
-        err_msg = error_data.get("error_message", str(error_data))
-        raise WorkerError(f"{err_type}: {err_msg}")
+        # RunPod serialises the error as a JSON string; decode it if so.
+        if isinstance(error_data, str):
+            try:
+                error_data = json.loads(error_data)
+            except (ValueError, TypeError):
+                raise WorkerError(error_data) from None
+        if isinstance(error_data, dict):
+            err_type = error_data.get("error_type", "Unknown")
+            err_msg = error_data.get("error_message", str(error_data))
+            raise WorkerError(f"{err_type}: {err_msg}")
+        raise WorkerError(str(error_data))
 
-    return data.get("output", data)
+    out = data.get("output", data)
+    # The worker may return a soft error in the output payload too.
+    if isinstance(out, dict) and isinstance(out.get("error"), str):
+        raise WorkerError(out["error"])
+    return out
 
 
 @st.cache_data(ttl=60, show_spinner=False)
@@ -177,7 +259,7 @@ def _fetch_models(worker_url: str, secret: str) -> tuple[list[str], str]:
         resp.raise_for_status()
         out = resp.json().get("output", {})
         return out.get("models", []), out.get("default", "")
-    except Exception:  # pylint: disable=broad-exception-caught
+    except Exception:  # noqa: BLE001
         return [], ""
 
 
@@ -215,30 +297,16 @@ def _render_sidebar() -> dict:
     st.sidebar.markdown("Samuel Pepys · London · 1660–1669  \n3,355 entries · 7,282 indexed chunks")
     st.sidebar.markdown("---")
 
-    st.sidebar.subheader("🔌 Worker")
-    worker_url = st.sidebar.text_input(
-        "Worker URL",
-        value="http://localhost:8000",
-        help="Base URL of the running corpus-pepys worker",
-    )
-    secret = st.sidebar.text_input(
-        "Secret (optional)",
-        value="",
-        type="password",
-        help="Set only when HANDLER_SECRET is configured in the worker",
-    )
-
-    st.sidebar.markdown("---")
     st.sidebar.subheader("⚙️ Search")
 
-    k = st.sidebar.slider("Results", min_value=1, max_value=50, value=8)
+    k = st.sidebar.slider("Results", min_value=1, max_value=50, value=10)
     min_score = st.sidebar.slider(
         "Min score",
         min_value=0.0,
         max_value=0.9,
-        value=0.0,
+        value=0.5,
         step=0.05,
-        help="Drop individual hits below this relevance score",
+        help="Drop individual hits below this similarity score",
     )
     semantic_floor = st.sidebar.slider(
         "Semantic floor",
@@ -256,7 +324,7 @@ def _render_sidebar() -> dict:
 
     model = ""
     if synthesize:
-        models, default = _fetch_models(worker_url, secret)
+        models, default = _fetch_models(_DEFAULT_WORKER, os.environ.get("HANDLER_SECRET", ""))
         if models:
             default_idx = models.index(default) if default in models else 0
             model = st.sidebar.selectbox(
@@ -272,6 +340,16 @@ def _render_sidebar() -> dict:
             st.rerun()
 
     st.sidebar.markdown("---")
+    st.sidebar.subheader("🖼️ Image")
+    resolution = st.sidebar.selectbox(
+        "Resolution",
+        options=list(_RESOLUTION_LABELS.keys()),
+        format_func=lambda r: _RESOLUTION_LABELS[r],
+        index=0,
+        help="Smaller = faster generation",
+    )
+
+    st.sidebar.markdown("---")
     st.sidebar.subheader("💡 Try asking")
     for q in _SUGGESTED_QUERIES:
         if st.sidebar.button(q, use_container_width=True, key=f"sq_{q[:30]}"):
@@ -283,13 +361,14 @@ def _render_sidebar() -> dict:
         st.rerun()
 
     return {
-        "worker_url": worker_url,
-        "secret": secret,
+        "worker_url": _DEFAULT_WORKER,
+        "secret": os.environ.get("HANDLER_SECRET", ""),
         "k": k,
         "min_score": min_score,
         "semantic_floor": semantic_floor,
         "synthesize": synthesize,
         "model": model,
+        "resolution": resolution,
     }
 
 
@@ -298,7 +377,40 @@ def _render_sidebar() -> dict:
 # ---------------------------------------------------------------------------
 
 
-def _render_assistant_turn(result: dict) -> None:
+def _result_to_markdown(result: dict) -> str:
+    """Render a query result (question, answer, sources) as a Markdown document."""
+    lines = ["# Pepys Diary — Result", ""]
+    if result.get("query"):
+        lines += [f"**Question:** {result['query']}", ""]
+    if result.get("synthesis"):
+        lines += ["## Answer", "", result["synthesis"], ""]
+        if result.get("model"):
+            lines += [f"_Model: {result['model']}_", ""]
+    hits = result.get("hits", [])
+    if hits:
+        lines += [f"## Source passages ({len(hits)})", ""]
+        for h in hits:
+            head = h.get("name") or h.get("node_id") or "passage"
+            src = h.get("source_path") or "—"
+            lines += [f"### {head}  ·  {src}  ·  score {h.get('score', 0):.3f}", ""]
+            lines += [(h.get("content") or h.get("summary") or "").strip(), ""]
+    return "\n".join(lines)
+
+
+def _build_image_prompt(result: dict) -> str:
+    if result.get("synthesis"):
+        return result["synthesis"][:800]
+    hits = result.get("hits", [])[:3]
+    parts = [h.get("content") or h.get("summary") or "" for h in hits]
+    return " ".join(p.strip() for p in parts if p.strip())[:800]
+
+
+def _open_image(path: Path) -> None:
+    st.image(str(path), use_container_width=True)
+    st.caption(f"📁 {path}")
+
+
+def _render_assistant_turn(result: dict, idx: int = 0, resolution: str = "Preview") -> None:
     synthesis = result.get("synthesis")
     synthesis_error = result.get("synthesis_error")
     hits = result.get("hits", [])
@@ -321,11 +433,96 @@ def _render_assistant_turn(result: dict) -> None:
             "Check that Ollama is running and reachable, or disable **Generate answer**."
         )
     else:
-        st.info("Answer generation off — see diary entries below.")
+        st.info("Answer generation off — see the source passages below.")
 
-    st.caption(f"📊 {total_hits} matching passages found")
+    _parts = [f"📊 {total_hits} matching passages found"]
+    if result.get("search_ms") is not None:
+        _parts.append(f"search {result['search_ms']:,} ms")
+    if result.get("synthesis_ms") is not None:
+        _parts.append(f"synthesis {result['synthesis_ms']:,} ms")
+    st.caption(" · ".join(_parts))
 
-    with st.expander(f"📄 Diary entries ({len(hits)} shown)", expanded=False):
+    save_col, aspect_col, render_col = st.columns([3, 2, 3], vertical_alignment="bottom")
+    with save_col:
+        st.download_button(
+            "💾 Save result",
+            data=_result_to_markdown(result),
+            file_name=f"pepys_result_{idx}.md",
+            mime="text/markdown",
+            key=f"dl_{idx}",
+        )
+    with aspect_col:
+        aspect = st.selectbox(
+            "Ratio",
+            options=["3:2", "16:9", "1:1", "4:3", "9:16", "2:3"],
+            label_visibility="collapsed",
+            key=f"aspect_{idx}",
+        )
+    with render_col:
+        render_clicked = st.button(
+            "🎨 Render response",
+            key=f"render_btn_{idx}",
+            use_container_width=True,
+            help="Generate an illustration from the diary passages using local FLUX",
+        )
+
+    if render_clicked:
+        import time
+
+        prompt = _build_image_prompt(result)
+        with st.spinner("Rewriting via VLM…"):
+            try:
+                from image_gen import vlm_rewrite
+
+                t0_vlm = time.perf_counter()
+                prompt, vlm_error = vlm_rewrite(prompt, base_url=_DEFAULT_VLM_ENDPOINT)
+                vlm_ms = round((time.perf_counter() - t0_vlm) * 1000)
+                if vlm_error:
+                    st.warning(f"VLM rewrite failed — sending raw corpus text. ({vlm_error})")
+                else:
+                    st.caption(
+                        f"🎨 Prompt: {prompt[:160]}{'…' if len(prompt) > 160 else ''} · VLM {vlm_ms:,} ms"
+                    )
+            except Exception as exc:  # noqa: BLE001
+                st.warning(f"VLM rewrite error: {exc}")
+
+        with st.spinner(f"Generating via {_DEFAULT_IMAGE_MODEL}…"):
+            try:
+                import base64
+                import tempfile
+
+                from PIL import Image as PILImage
+
+                size = _RESOLUTION_SIZES.get(resolution, _RESOLUTION_SIZES["Preview"]).get(
+                    aspect, "768x512"
+                )
+                t0_img = time.perf_counter()
+                resp = httpx.post(
+                    _DEFAULT_IMAGE_SERVER.rstrip("/") + "/v1/images/generations",
+                    json={
+                        "model": _DEFAULT_IMAGE_MODEL,
+                        "prompt": prompt,
+                        "n": 1,
+                        "size": size,
+                        "num_inference_steps": _DEFAULT_IMAGE_STEPS,
+                    },
+                    timeout=httpx.Timeout(connect=5.0, read=300.0, write=10.0, pool=5.0),
+                )
+                resp.raise_for_status()
+                img_ms = round((time.perf_counter() - t0_img) * 1000)
+                b64 = resp.json()["data"][0]["b64_json"]
+                out_path = Path(tempfile.mkdtemp()) / f"pepys_render_{int(time.time())}.png"
+                PILImage.open(io.BytesIO(base64.b64decode(b64))).save(str(out_path))
+                _open_image(out_path)
+                st.caption(f"🖼️ {_DEFAULT_IMAGE_MODEL} · {resolution} · {size} · {img_ms:,} ms")
+            except httpx.HTTPStatusError as exc:
+                st.error(f"Image server HTTP {exc.response.status_code}: {exc.response.text[:400]}")
+            except Exception as exc:  # noqa: BLE001
+                st.error(f"Image server error: {exc}")
+
+    # Source passages are hidden by default once we have a synthesized answer —
+    # the answer is the result; the passages are the evidence behind it.
+    with st.expander(f"📄 Source passages ({len(hits)})", expanded=not bool(synthesis)):
         for hit in hits:
             _render_hit_card(hit)
 
@@ -339,18 +536,24 @@ def main() -> None:
     _init_state()
     cfg = _render_sidebar()
 
-    st.title("📔 The Diary of Samuel Pepys")
+    title_col, clear_col = st.columns([5, 1])
+    with title_col:
+        st.title("📔 The Diary of Samuel Pepys")
+    with clear_col:
+        if st.session_state.messages and st.button("🗑️ Clear", use_container_width=True):
+            st.session_state.messages = []
+            st.rerun()
     st.caption(
         "Search nine years of 17th-century London — the Restoration court, the Great Plague, "
         "the Great Fire, the Navy Office, and the daily life of a remarkable man."
     )
 
-    for msg in st.session_state.messages:
+    for i, msg in enumerate(st.session_state.messages):
         with st.chat_message(msg["role"]):
             if msg["role"] == "user":
                 st.markdown(msg["content"])
             else:
-                _render_assistant_turn(msg["result"])
+                _render_assistant_turn(msg["result"], idx=i, resolution=cfg["resolution"])
 
     prompt = st.chat_input("Ask about Pepys' world…")
     if not prompt and st.session_state.pending_query:
@@ -391,7 +594,7 @@ def main() -> None:
                     st.error(f"Worker error: {exc}")
                     st.session_state.messages.pop()
                     st.stop()
-                except Exception as exc:  # pylint: disable=broad-exception-caught
+                except Exception as exc:  # noqa: BLE001
                     st.error(f"Unexpected error: {exc}")
                     st.session_state.messages.pop()
                     st.stop()
@@ -401,7 +604,9 @@ def main() -> None:
                 st.session_state.messages.pop()
                 st.stop()
 
-            _render_assistant_turn(result)
+            _render_assistant_turn(
+                result, idx=len(st.session_state.messages), resolution=cfg["resolution"]
+            )
 
         st.session_state.messages.append(
             {
@@ -410,6 +615,10 @@ def main() -> None:
                 "result": result,
             }
         )
+        # Re-run so the page renders from history with the new messages in
+        # session state (e.g. the top-of-page Clear button appears). The answer
+        # is already stored, so this re-renders without re-querying the worker.
+        st.rerun()
 
 
 if __name__ == "__main__":

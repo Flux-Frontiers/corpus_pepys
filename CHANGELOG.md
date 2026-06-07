@@ -5,21 +5,44 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.2.0] — 2026-06-05
+## [0.3.0] — 2026-06-06
 
 ### Added
+- `docker/image_gen.py` (new): image-generation module — `generate()` runs Flux2Klein locally via mflux (Apple Silicon), `generate_via_server()` calls a running mflux-serve HTTP instance, `generate_auto()` picks the right path automatically; `vlm_rewrite()` rewrites corpus prose into a visual scene description via a local VLM before passing it to FLUX
+- `docker/image_server.py` (new): FastAPI/uvicorn wrapper around `image_gen.generate()` — keeps Flux2Klein loaded in-process between requests (no per-request cold-start), exposes OpenAI-compatible `/v1/models` and `/v1/images/generations`; replaces the `uvx mflux-serve` subprocess dependency
+- `docker/chat.py`: **🎨 Render response** per-result button — sends diary passages through `vlm_rewrite()` (VLM prompt rewrite) then to the local FLUX image server; inline aspect-ratio picker (3:2, 16:9, 1:1, 4:3, 9:16, 2:3); rendered image displayed directly in the chat
+- `docker/handler.py`: `op=imagine` operation — proxies image-generation requests to `IMAGE_ENDPOINT` (mflux-serve); accepts `prompt`, `aspect_ratio`, `steps`, and `seed`
+- `Makefile`: `image-server` target (starts FLUX server as a background process on `:8090`); `up` target (one-shot launch for worker + chat + image server together); `$(COMPOSE)` variable to avoid repeating the compose file path; `down` alias for `stop`
+- `docker/chat.py`, `docker/handler.py`: result cards now show the **actual diary passage**, not a truncated summary — the worker attaches each hit's full source text (`_attach_content` reads `nodes.text` in one batched query) and the UI shows a 200-char word-boundary preview that expands to the full entry (📖 Full entry). No extra text is stored; the text already lived in the DiaryKG store
+- `docker/chat.py`: **💾 Save result** — download any answer (question, synthesized answer, and all source passages with scores) as a Markdown file
+- `docker/chat.py`: **🗑️ Clear** button in the main pane (beside the title) in addition to the sidebar; the page re-runs after each answer so it appears reliably
 - `docker/chat.py`, `docker/handler.py`: in-app **model picker** — the chat sidebar shows a dropdown of synthesis models pulled live from the worker (`{"op": "models"}` → the backend's `/v1/models`), and the chosen model is sent per-request via a new `model` override. The assistant turn shows which model produced the answer. Switch models with no restart or config edit
 - `docker/handler.py`: `SYNTH_MAX_K` environment variable (default 12) — caps the number of diary snippets fed to LLM synthesis so a large display-`k` can't overflow the model's context window (Ollama defaults to `num_ctx=4096`; oMLX/vLLM are larger but finite). Retrieval/display `k` is unaffected
 - `docker/handler.py`: `chat_template_kwargs.enable_thinking=false` is now sent alongside `think:false` to suppress Qwen3 reasoning where the backend supports it — oMLX/vLLM honour `chat_template_kwargs`, Ollama honours `think`; each ignores the field it doesn't recognise (the `<think>` strip remains a backstop). On hybrid *thinking* models this toggle is only best-effort, which is why the default model is a non-thinking Instruct variant (see below)
 - `.secrets.baseline`: detect-secrets baseline (the pre-commit hook referenced it but the file was missing)
+- `docker/handler.py`, `docker/chat.py`: **search and synthesis timing** — the worker now returns `search_ms` and `synthesis_ms` in every query response; the chat UI displays them in the result caption (`📊 N passages · search X ms · synthesis Y ms`)
+- `docker/chat.py`: **VLM rewrite and image generation timings** shown in per-render captions (`🎨 Prompt: … · VLM X ms` and `🖼️ model · Resolution · WxH · X ms`)
+- `docker/chat.py`: **🖼️ Resolution** sidebar selectbox — Preview (768×512), Standard (1152×768), Full (1536×1024); chosen resolution drives the FLUX request size and is shown in the image caption
+- `docker/image_server.py`: `filepath` response format — when `response_format=filepath`, the server saves the PNG to `IMAGE_OUTPUT_DIR` (default `/tmp/pepys_images`) and returns the path instead of base64; `IMAGE_OUTPUT_DIR` env var configures the output directory
 
 ### Changed
+- `docker/Dockerfile`: now installs `mflux`, `streamlit`, `httpx`, `openai`, and `uvicorn` in the image; copies `chat.py` and `image_gen.py` alongside `handler.py` so the container can serve or generate images
+- `docker/docker-compose.yml`: `IMAGE_ENDPOINT` env var forwarded to both worker and chat services; `extra_hosts: host.docker.internal:host-gateway` added so containers can reach the host-side image server
+- `docker/chat.py`: worker URL and secret now sourced from `KGRAG_ENDPOINT` / `HANDLER_SECRET` environment variables instead of sidebar text inputs — simplifies the UI and avoids exposing connection details
+- `pyproject.toml`: added `mflux`, `openai`, `uvicorn`, and `fastapi` to project dependencies
 - Synthesis backend default model is now `Qwen3-30B-A3B-Instruct-2507-MLX-4bit` (`docker/handler.py`, `docker/.env.example`, `docker/docker-compose.yml`), replacing `Qwen3-4B-Instruct-2507-MLX-8bit` — a larger MoE for higher-quality answers, and a non-thinking Instruct model so reasoning traces never leak into the response
-- `docker/chat.py`: "Results" slider maximum raised from 20 to 50
+- `docker/chat.py`: source passages are now collapsed by default once an answer is synthesized — the answer is the result, the passages are the supporting evidence
+- Default corpus is now `diary` (`docker/chat.py` queries it; the worker accepts `diary`/`all`); the `pepys` corpus name was removed
+- `docker/chat.py`: sidebar defaults — "Results" `8 → 10` (max also raised `20 → 50`), "Min score" (similarity) `0.0 → 0.5`
+- `IMAGE_STEPS` env var unified — previously `GUTENKG_IMAGE_STEPS` in `image_gen.py` / `image_server.py`, now `IMAGE_STEPS` everywhere (`handler.py`, `docker-compose.yml`, `.env.example`); `docker/chat.py` reads `IMAGE_STEPS` and forwards it as `num_inference_steps` per-request so a single env var controls all three services
 - `.pre-commit-config.yaml`: `mypy` hook retargeted from the nonexistent `src/` to `docker/` (repo has no `src/` layout)
 - `.gitignore`: removed unneeded entries (cleanup)
 
+### Fixed
+- `docker/chat.py`: the chat UI no longer crashes with `'str' object has no attribute 'get'` on a worker `FAILED` response — the JSON-string error payload is decoded and the real message is shown
+
 ### Removed
+- `docker/handler.py`: the `pepys` corpus alias (use `diary`)
 - `.pre-commit-config.yaml`: `pytest` hook (project has no test suite) and `pylint` hook (not installed, no config, redundant with ruff)
 - `analysis/pepys_enriched_full_run_summary.md`, `analysis/pepys_enriched_full_mpnet_embeddings_run_summary.md`: stale run summaries (cleanup)
 

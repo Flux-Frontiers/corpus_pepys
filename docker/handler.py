@@ -23,25 +23,33 @@ VLLM_ENDPOINT_URL Optional: OpenAI-compatible endpoint base URL for synthesis (o
 VLLM_API_KEY      Optional: Bearer token for the synthesis endpoint.  Omit for Ollama.
 VLLM_MODEL        Model ID.  Default: Qwen3-30B-A3B-Instruct-2507-MLX-4bit (must match a served oMLX model_id)
 SYNTH_MAX_K       Max snippets fed to synthesis (guards LLM ctx window).  Default: 12
+IMAGE_ENDPOINT    Optional: base URL of a running mflux-serve (e.g. http://host.docker.internal:8090).
+IMAGE_STEPS       Default inference steps for image generation.  Default: 6
 
 Request schema
 --------------
 {
-  "query":          str   — natural-language query (required)
+  "query":          str   — natural-language query (required, except for op-only requests)
   "secret":         str   — required when HANDLER_SECRET is set
-  "corpus":         str   — "pepys" | "all"  (default: "all")
+  "corpus":         str   — "diary" | "all"  (default: "all")
   "k":              int   — top-k hits  (default: 8)
   "min_score":      float — drop hits below this score  (default: 0.0)
   "semantic_floor": float — discard KG if best hit is below this  (default: 0.0)
   "synthesize":     bool  — call vLLM for a generated answer  (default: false)
   "model":          str   — override VLLM_MODEL for this request  (default: VLLM_MODEL)
-  "op":             str   — "models" returns {"models": [...], "default": ...} and ignores the above
+  "op":             str   — "models"  → {"models": [...], "default": ...}
+                            "imagine" → {"image_b64": "...", "prompt": ..., "aspect_ratio": ...}
+  "prompt":         str   — image prompt (required when op="imagine")
+  "aspect_ratio":   str   — one of 1:1 3:2 2:3 16:9 9:16 4:3 3:4  (default: 3:2)
+  "steps":          int   — inference steps  (default: 6)
+  "seed":           int   — optional RNG seed
 }
 """
 
 from __future__ import annotations
 
 import os
+import time
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -56,13 +64,15 @@ PEPYS_KG_ROOT = Path(os.environ.get("PEPYS_KG_ROOT", "/workspace/pepys"))
 REGISTRY_PATH = Path("/tmp/pepys_worker/registry.sqlite")
 VLLM_ENDPOINT = os.environ.get("VLLM_ENDPOINT_URL", "")
 VLLM_API_KEY = os.environ.get("VLLM_API_KEY", "")
-VLLM_MODEL = os.environ.get("VLLM_MODEL", "Qwen3-30B-A3B-Instruct-2507-MLX-4bit")
+VLLM_MODEL = os.environ.get("VLLM_MODEL", "Qwen3-4B-Instruct-2507-MLX-8bit")
 # Cap snippets fed to synthesis so a large display-k can't overflow the LLM
 # context window (Ollama defaults to num_ctx=4096; oMLX/vLLM are larger but
 # still finite). Retrieval/display k is unaffected.
 SYNTH_MAX_K = int(os.environ.get("SYNTH_MAX_K", "12"))
 EMBED_MODEL = os.environ.get("EMBED_MODEL", "BAAI/bge-small-en-v1.5")
 HANDLER_SECRET = os.environ.get("HANDLER_SECRET", "")
+IMAGE_ENDPOINT = os.environ.get("IMAGE_ENDPOINT", "")  # base URL of mflux-serve
+IMAGE_STEPS = int(os.environ.get("IMAGE_STEPS", "4"))
 
 _PEPYS_SQLITE = PEPYS_KG_ROOT / ".diarykg" / "graph.sqlite"
 _PEPYS_LANCEDB = PEPYS_KG_ROOT / ".diarykg" / "lancedb"
@@ -147,6 +157,33 @@ def _hit_to_dict(hit) -> dict:
     }
 
 
+def _attach_content(hits: list[dict]) -> None:
+    """Attach each hit's full source text (``nodes.text``) under a ``content`` key.
+
+    The diary text already lives in the DiaryKG SQLite store, keyed by node id —
+    so rather than ship a truncated summary, we look up the real passage in one
+    batched query and let the UI preview/expand it. No extra text is stored.
+    """
+    ids = [h["node_id"] for h in hits if h.get("node_id")]
+    if not ids:
+        return
+    import sqlite3
+
+    db = getattr(_diarykg, "_db_path", None) or (PEPYS_KG_ROOT / ".diarykg" / "graph.sqlite")
+    text_by_id: dict[str, str] = {}
+    try:
+        with sqlite3.connect(str(db)) as con:
+            placeholders = ",".join("?" * len(ids))
+            for node_id, text in con.execute(
+                f"SELECT id, text FROM nodes WHERE id IN ({placeholders})", ids
+            ):
+                text_by_id[node_id] = text or ""
+    except Exception:  # noqa: BLE001
+        return
+    for h in hits:
+        h["content"] = text_by_id.get(h["node_id"], "")
+
+
 def _list_models() -> list[str]:
     """Return the model IDs the synthesis backend currently serves (empty if none)."""
     if not VLLM_ENDPOINT:
@@ -162,64 +199,115 @@ def _list_models() -> list[str]:
         )
         resp.raise_for_status()
         return [m["id"] for m in resp.json().get("data", []) if m.get("id")]
-    except Exception:  # pylint: disable=broad-exception-caught
+    except Exception:  # noqa: BLE001
         return []
 
 
-def _synthesize(query: str, k: int, model: str | None = None) -> str | None:
+_ASPECT_SIZES: dict[str, tuple[int, int]] = {
+    "1:1": (1024, 1024),
+    "3:2": (1536, 1024),
+    "2:3": (1024, 1536),
+    "16:9": (1536, 864),
+    "9:16": (864, 1536),
+    "4:3": (1365, 1024),
+    "3:4": (1024, 1365),
+}
+
+
+def _imagine(inp: dict) -> dict:
+    """Handle op=imagine — proxy the prompt to IMAGE_ENDPOINT (mflux-serve)."""
+    if not IMAGE_ENDPOINT:
+        return {
+            "error": "IMAGE_ENDPOINT not configured — set it to the base URL of a running mflux-serve"
+        }
+
+    prompt = (inp.get("prompt") or "").strip()
+    if not prompt:
+        return {"error": "imagine requires a non-empty 'prompt'"}
+
+    aspect = inp.get("aspect_ratio", "3:2")
+    steps = int(inp.get("steps", IMAGE_STEPS))
+    seed = inp.get("seed")
+
+    width, height = _ASPECT_SIZES.get(aspect, _ASPECT_SIZES["3:2"])
+    payload: dict = {
+        "prompt": prompt,
+        "n": 1,
+        "size": f"{width}x{height}",
+        "num_inference_steps": steps,
+        "response_format": "b64_json",
+    }
+    if seed is not None:
+        payload["seed"] = int(seed)
+
+    try:
+        import httpx
+
+        resp = httpx.post(
+            IMAGE_ENDPOINT.rstrip("/") + "/v1/images/generations",
+            json=payload,
+            timeout=httpx.Timeout(connect=5.0, read=300.0, write=10.0, pool=5.0),
+        )
+        resp.raise_for_status()
+        b64 = resp.json()["data"][0]["b64_json"]
+        return {"image_b64": b64, "prompt": prompt, "aspect_ratio": aspect}
+    except Exception as exc:  # noqa: BLE001
+        return {"error": f"image server error: {exc}"}
+
+
+def _synthesize(query: str, hits: list[dict], model: str | None = None) -> str | None:
     if not VLLM_ENDPOINT:
         return None
     import re
 
     import httpx
 
-    snippets = _diarykg.pack(query, k=min(k, SYNTH_MAX_K))
+    snippets = [h for h in hits[:SYNTH_MAX_K] if h.get("content")]
     if not snippets:
         return None
 
-    ctx = "\n\n".join(
-        f"[{s.get('timestamp', '')[:10]}]\n{s.get('content', '')}"
-        for s in snippets
-        if s.get("content")
-    )
+    ctx = "\n\n".join(f"[{h.get('name', '')[:10]}]\n{h['content'].strip()}" for h in snippets)
     if not ctx:
         return None
 
     headers = {"Authorization": f"Bearer {VLLM_API_KEY}"} if VLLM_API_KEY else {}
-    resp = httpx.post(
-        f"{VLLM_ENDPOINT}/v1/chat/completions",
-        headers=headers,
-        json={
-            "model": model or VLLM_MODEL,
-            # Disable Qwen3 reasoning so the answer isn't polluted with chain-of-
-            # thought. Backends differ: Ollama honours "think"; oMLX/vLLM honour
-            # "chat_template_kwargs.enable_thinking". Send both; each ignores the
-            # field it doesn't recognise. (<think> stripping below is a backstop.)
-            "think": False,
-            "chat_template_kwargs": {"enable_thinking": False},
-            "messages": [
-                {
-                    "role": "system",
-                    "content": (
-                        "You are a knowledgeable guide to Samuel Pepys' diary. "
-                        "Answer the question using only the provided diary excerpts. "
-                        "Be concise and specific. Quote dates when relevant."
-                    ),
-                },
-                {
-                    "role": "user",
-                    "content": f"Diary excerpts:\n{ctx}\n\nQuestion: {query}",
-                },
-            ],
-            "max_tokens": 2048,
-        },
-        timeout=httpx.Timeout(connect=10.0, read=600.0, write=60.0, pool=10.0),
-    )
-    resp.raise_for_status()
-    content = resp.json()["choices"][0]["message"]["content"]
-    # Strip any <think>…</think> blocks that leak through from reasoning models.
-    content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
-    return content or None
+    try:
+        resp = httpx.post(
+            f"{VLLM_ENDPOINT}/v1/chat/completions",
+            headers=headers,
+            json={
+                "model": model or VLLM_MODEL,
+                # Disable Qwen3 reasoning so the answer isn't polluted with chain-of-
+                # thought. Backends differ: Ollama honours "think"; oMLX/vLLM honour
+                # "chat_template_kwargs.enable_thinking". Send both; each ignores the
+                # field it doesn't recognise. (<think> stripping below is a backstop.)
+                "think": False,
+                "chat_template_kwargs": {"enable_thinking": False},
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are a knowledgeable guide to Samuel Pepys' diary. "
+                            "Answer the question using only the provided diary excerpts. "
+                            "Be concise and specific. Quote dates when relevant."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": f"Diary excerpts:\n{ctx}\n\nQuestion: {query}",
+                    },
+                ],
+                "max_tokens": 2048,
+            },
+            timeout=httpx.Timeout(connect=10.0, read=600.0, write=60.0, pool=10.0),
+        )
+        resp.raise_for_status()
+        content = resp.json()["choices"][0]["message"]["content"]
+        # Strip any <think>…</think> blocks that leak through from reasoning models.
+        content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+        return content or None
+    except Exception:  # noqa: BLE001
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -238,6 +326,9 @@ def handler(job: dict) -> dict:
     if inp.get("op") == "models":
         return {"models": _list_models(), "default": VLLM_MODEL}
 
+    if inp.get("op") == "imagine":
+        return _imagine(inp)
+
     query = inp.get("query", "").strip()
     corpus = inp.get("corpus", "all")
     k = max(1, int(inp.get("k", 8)))
@@ -249,12 +340,14 @@ def handler(job: dict) -> dict:
     if not query:
         return {"error": "query is required"}
 
-    if corpus not in ("pepys", "all"):
-        return {"error": f"unknown corpus {corpus!r}; choose: pepys, all"}
+    if corpus not in ("diary", "all"):
+        return {"error": f"unknown corpus {corpus!r}; choose: diary, all"}
 
     from kg_rag.primitives import KGKind
 
-    kind_filter = [KGKind.DIARY] if corpus == "pepys" else None
+    kind_filter = [KGKind.DIARY] if corpus == "diary" else None
+
+    t0_search = time.perf_counter()
 
     result = _kgrag.query(
         query,
@@ -265,7 +358,18 @@ def handler(job: dict) -> dict:
     )
 
     hits = [_hit_to_dict(h) for h in result.hits]
-    synthesis = _synthesize(query, k, model) if synthesize else None
+    _attach_content(hits)
+
+    search_ms = (time.perf_counter() - t0_search) * 1000
+    print(f"[query] {len(hits)} matching results found in {search_ms:.0f}ms")
+
+    synthesis = None
+    synthesis_ms: float | None = None
+    if synthesize:
+        t0_synth = time.perf_counter()
+        synthesis = _synthesize(query, hits, model)
+        synthesis_ms = (time.perf_counter() - t0_synth) * 1000
+        print(f"[query] synthesis returned in {synthesis_ms:.0f}ms")
 
     return {
         "query": query,
@@ -273,7 +377,9 @@ def handler(job: dict) -> dict:
         "total_hits": result.total_hits,
         "kgs_queried": result.kgs_queried,
         "hits": hits,
+        "search_ms": round(search_ms),
         "synthesis": synthesis,
+        "synthesis_ms": round(synthesis_ms) if synthesis_ms is not None else None,
         "model": (model or VLLM_MODEL) if synthesize else None,
     }
 

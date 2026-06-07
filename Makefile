@@ -1,9 +1,11 @@
-.PHONY: help build-corpus build-index reindex build-image run stop chat query serve-llm clean
+.PHONY: help build-corpus build-index reindex build-image run stop down image-server chat up query serve-llm clean
 
 CORPUS_SOURCE ?= data/pepys_enriched_full.txt
 IMAGE_NAME    ?= corpus-pepys
 QUERY         ?= Great Fire of London
 OMLX_PORT     ?= 8080
+COMPOSE       = docker compose -f docker/docker-compose.yml
+IMAGE_SERVER  = http://localhost:8090
 
 help:
 	@echo "corpus_pepys — Samuel Pepys DiaryKG"
@@ -71,11 +73,26 @@ build-image:
 # Run / stop
 # ------------------------------------------------------------------
 run:
-	docker compose -f docker/docker-compose.yml up -d
+	$(COMPOSE) up -d pepys-worker
 	@echo "Pepys KGRAG running on http://localhost:8000"
 
-stop:
-	docker compose -f docker/docker-compose.yml down
+down:
+	$(COMPOSE) --profile chat down
+	-pkill -f image_server.py 2>/dev/null || true
+
+image-server:
+	@echo "Starting FLUX image server on $(IMAGE_SERVER) (background) ..."
+	poetry run python docker/image_server.py &
+
+up:
+	@echo "Starting worker + chat (Docker) ..."
+	$(COMPOSE) --profile chat up -d
+	@echo "Starting FLUX image server in background ..."
+	poetry run python docker/image_server.py &
+	@echo ""
+	@echo "Worker:       http://localhost:8000"
+	@echo "Image server: $(IMAGE_SERVER)"
+	@echo "Chat UI:      http://localhost:8501"
 
 # ------------------------------------------------------------------
 # Chat UI — Streamlit frontend against the running worker

@@ -17,7 +17,7 @@ WORKDIR /app
 
 # Install diary-kg from PyPI (provides DiaryKG, doc-kg, and diarykg CLI).
 # watchdog: faster Streamlit file-watching via native OS events (vs. polling).
-RUN pip install --no-cache-dir diary-kg watchdog
+RUN pip install --no-cache-dir diary-kg watchdog streamlit httpx openai uvicorn
 
 # Pre-download the embedding model during build so the container never needs
 # to reach HuggingFace at runtime (network may be unavailable or restricted).
@@ -40,7 +40,9 @@ ENV TRANSFORMERS_OFFLINE=1
 COPY .diarykg/ /workspace/pepys/.diarykg/
 
 # Pepys-specific handler (replaces the upstream gutenberg/metabo handler)
-COPY docker/handler.py /app/handler.py
+COPY docker/handler.py   /app/handler.py
+COPY docker/chat.py      /app/chat.py
+COPY docker/image_gen.py /app/image_gen.py
 
 ENV PEPYS_KG_ROOT=/workspace/pepys
 ENV EMBED_MODEL=BAAI/bge-small-en-v1.5

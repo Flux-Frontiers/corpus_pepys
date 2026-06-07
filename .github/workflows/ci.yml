@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Lint & type-check
+  # Full poetry install is skipped — ruff and ty are installed directly.
+  # ---------------------------------------------------------------------------
+  lint:
+    name: Lint & type-check
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install lint tools
+        run: pip install "ruff>=0.4.0" "ty>=0.0.41"
+
+      - name: ruff — check
+        run: ruff check docker/
+
+      - name: ruff — format
+        run: ruff format --check docker/
+
+      - name: ty
+        run: ty check docker/
+
+  # ---------------------------------------------------------------------------
+  # Docker artefact validation
+  # Full image build is skipped — it requires the baked-in .diarykg/ index
+  # which is generated locally and gitignored.  We lint the Dockerfile with
+  # hadolint and verify that docker-compose parses cleanly instead.
+  # ---------------------------------------------------------------------------
+  docker:
+    name: Validate Docker artefacts
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Lint Dockerfile (hadolint)
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: docker/Dockerfile
+          # DL3013: pip version pinning — managed by poetry.lock, not the Dockerfile
+          # DL3059: consolidate RUN steps — embedding pre-download is intentionally layered
+          ignore: DL3013,DL3059
+
+      - name: Validate docker-compose syntax
+        run: docker compose -f docker/docker-compose.yml config --quiet
