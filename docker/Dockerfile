@@ -17,7 +17,7 @@ WORKDIR /app
 
 # Install diary-kg from PyPI (provides DiaryKG, doc-kg, and diarykg CLI).
 # watchdog: faster Streamlit file-watching via native OS events (vs. polling).
-RUN pip install --no-cache-dir diary-kg watchdog streamlit httpx openai uvicorn
+RUN pip install --no-cache-dir "kgmodule-utils[synthesis]>=0.4.0" diary-kg watchdog streamlit httpx openai uvicorn
 
 # Pre-download the embedding model during build so the container never needs
 # to reach HuggingFace at runtime (network may be unavailable or restricted).
