@@ -1,4 +1,4 @@
-.PHONY: help build-corpus build-index reindex build-image run stop down image-server chat up query serve-llm clean
+.PHONY: help build-corpus build-index reindex build-image run stop down image-server chat up query serve-llm test lint clean
 
 CORPUS_SOURCE ?= data/pepys_enriched_full.txt
 IMAGE_NAME    ?= corpus-pepys
@@ -81,14 +81,20 @@ down:
 	-pkill -f image_server.py 2>/dev/null || true
 
 image-server:
-	@echo "Starting FLUX image server on $(IMAGE_SERVER) (background) ..."
-	poetry run python docker/image_server.py &
+	@if [ ! -x .venv-image/bin/python ]; then \
+		echo "Creating .venv-image for isolated image dependencies ..."; \
+		python3 -m venv .venv-image; \
+	fi
+	@.venv-image/bin/python -m pip install --quiet --upgrade pip
+	@.venv-image/bin/python -m pip install --quiet -r docker/requirements-image.txt
+	@echo "Starting FLUX image server on $(IMAGE_SERVER) (background, .venv-image) ..."
+	MFLUX_SERVER_HOST=0.0.0.0 .venv-image/bin/python docker/image_server.py &
 
 up:
 	@echo "Starting worker + chat (Docker) ..."
 	$(COMPOSE) --profile chat up -d
 	@echo "Starting FLUX image server in background ..."
-	poetry run python docker/image_server.py &
+	$(MAKE) image-server
 	@echo ""
 	@echo "Worker:       http://localhost:8000"
 	@echo "Image server: $(IMAGE_SERVER)"
@@ -107,7 +113,7 @@ query:
 	@echo "Querying: $(QUERY)"
 	curl -s -X POST http://localhost:8000/runsync \
 		-H "Content-Type: application/json" \
-		-d '{"input":{"query":"$(QUERY)","corpus":"pepys","k":5}}' | python3 -m json.tool
+		-d '{"input":{"query":"$(QUERY)","corpus":"diary","k":5}}' | python3 -m json.tool
 
 # ------------------------------------------------------------------
 # Optional LLM synthesis backend — oMLX (Apple Silicon, OpenAI-compatible).
@@ -119,6 +125,16 @@ serve-llm:
 	@command -v omlx >/dev/null 2>&1 || (echo "ERROR: omlx not found — install from https://omlx.ai" && exit 1)
 	@echo "Starting oMLX synthesis backend on http://localhost:$(OMLX_PORT) ..."
 	omlx serve --port $(OMLX_PORT)
+
+# ------------------------------------------------------------------
+# Tests & lint
+# ------------------------------------------------------------------
+test:
+	pytest
+
+lint:
+	ruff check docker/ scripts/
+	ruff format --check docker/ scripts/
 
 # ------------------------------------------------------------------
 # Cleanup

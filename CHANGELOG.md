@@ -5,6 +5,69 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [Unreleased]
+
+### Added
+- **Test suite** (`tests/`) — 58 unit tests covering `docker/handler.py` and
+  `docker/image_gen.py`, runnable with no KGRAG environment:
+  - `tests/conftest.py`: stubs `runpod`, `kg_rag`, `kg_utils`, and `lancedb`
+    into `sys.modules` before import so handler.py's startup code runs against
+    lightweight mocks
+  - `tests/test_handler.py` (36 tests): `_rows_to_hits` (score/filter/defaults),
+    `_attach_diary_fields` (temp-SQLite hydration), `_semantic_search` (no-table
+    guard, semantic-floor), and `handler()` dispatch (auth, query validation,
+    corpus validation, response shape, synthesis on/off)
+  - `tests/test_image_gen.py` (22 tests): `_ASPECT_SIZES` completeness and
+    orientation, `_load_model` cache hit path, and `generate()` (aspect ratio
+    lookup + fallback, seed, output path, steps override)
+- `Makefile`: `make test` (runs pytest) and `make lint` (ruff check + format
+  check on `docker/` and `scripts/`) targets
+- `scripts/check_standard_queries.py` — validation harness that runs the eight
+  standard diary queries against a live worker and asserts each returns at least
+  one hit, printing the top results with scores and timestamps
+- `docker/requirements-image.txt` + isolated `.venv-image` for the host-side FLUX
+  image server — `make image-server` now creates/installs into `.venv-image`
+  instead of relying on the Poetry env (mflux is not a project dependency, so the
+  previous `poetry run python docker/image_server.py` failed at import)
+- `docker/image_server.py`: `IMAGE_PRELOAD` env gate (default off) — the model
+  is lazy-loaded on first generation request, so endpoint-only deployments don't
+  need mflux model imports at startup
+
+### Changed
+- **Worker retrieval is now semantic-first** (`docker/handler.py`). Queries rank
+  chunks by their *own* cosine distance via a direct LanceDB search
+  (`metric("cosine")`, chunk/section pre-filter) instead of the KGRAG
+  orchestrator's graph-hop expansion, which let chunks inherit a flat seed score
+  from graph-expanded neighbours. Clean passage text and diary timestamps are
+  hydrated from SQLite (the LanceDB `text` column holds prefixed embed-text, not
+  the clean passage). Mirrors the gutenberg_kg worker change.
+- `docker/chat.py`: **Resolution picker now actually drives the render size** —
+  the chosen preset is sent as `size` to the image backend (it was shown in the
+  caption but never sent, so every render came back at 1536×1024). The aspect
+  ratio selector is removed; images are fixed at 3:2 with resolution presets,
+  matching the gutenberg_kg chat UI
+- `docker/chat.py`: theme-aware hit cards and score bars — hardcoded dark-theme
+  hex colours replaced with Streamlit theme variables (`var(--text-color)`,
+  `var(--secondary-background-color)`); previews widened to 220 chars
+- `docker/Dockerfile`: `kgmodule-utils[synthesis]` pinned to `0.4.3` via
+  `KGMODULE_UTILS_VERSION` build arg (carries the image-size fix needed by the
+  resolution picker); `uvicorn` dropped from the container install (the image
+  server runs on the host, not in the container)
+- `pyproject.toml`: `kgmodule-utils[synthesis]` floor bumped to `>=0.4.3`
+- `Makefile` / `docker-compose.yml`: `make query` and the compose header comment
+  now send `corpus="diary"` (the handler never accepted `"pepys"`)
+- `.gitignore`: ignore `.vscode/`
+
+### Removed
+- **KGRAG orchestrator from the worker query path** — `handler.py` no longer
+  initialises `KGRAG`; retrieval is served directly from the LanceDB table
+- `docker/image_gen.py`: `vlm_rewrite()`, `generate_via_server()`, and
+  `generate_auto()` removed — these paths moved to
+  `kg_utils.synthesis.TextSynthesizer` / `ImageSynthesizer` in the kgmodule-utils
+  migration; the module is now local-generation only (used by `image_server.py`)
+
+---
+
 ## [0.3.0] — 2026-06-06
 
 ### Added

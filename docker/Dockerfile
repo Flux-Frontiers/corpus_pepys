@@ -15,9 +15,19 @@ FROM egsuchanek/kgrag-worker:latest
 
 WORKDIR /app
 
-# Install diary-kg from PyPI (provides DiaryKG, doc-kg, and diarykg CLI).
+# Install diary-kg + doc-kg from PyPI (DiaryKG, DocKG, and the diarykg CLI).
+# doc-kg MUST be pinned explicitly: it is an *optional/extra* dependency of
+# diary-kg, so a plain `pip install diary-kg` does NOT pull it — at runtime it
+# would otherwise come from the base image at an uncontrolled version.
+# diary-kg 0.93.0 + doc-kg 0.15.6 carry the FTS5/BM25 + RRF fusion that fixes
+# exact-phrase retrieval (e.g. "Parmazan cheese"); doc-kg<0.15.6 lacks
+# GraphStore.search_lexical and breaks the diary query path.
 # watchdog: faster Streamlit file-watching via native OS events (vs. polling).
-RUN pip install --no-cache-dir "kgmodule-utils[synthesis]>=0.4.0" diary-kg watchdog streamlit httpx openai uvicorn
+# kgmodule-utils 0.4.3 carries the image-size fix (Resolution picker pass-through).
+ARG KGMODULE_UTILS_VERSION=0.4.3
+ARG DIARY_KG_VERSION=0.93.1
+ARG DOC_KG_VERSION=0.15.6
+RUN pip install --no-cache-dir "kgmodule-utils[synthesis]==${KGMODULE_UTILS_VERSION}" "diary-kg==${DIARY_KG_VERSION}" "doc-kg==${DOC_KG_VERSION}" watchdog streamlit httpx openai
 
 # Pre-download the embedding model during build so the container never needs
 # to reach HuggingFace at runtime (network may be unavailable or restricted).

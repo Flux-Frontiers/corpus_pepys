@@ -56,13 +56,20 @@ Request schema
 from __future__ import annotations
 
 import os
+import sqlite3
 import time
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
 import runpod
-from kg_utils.synthesis import image_synthesizer_from_env, text_synthesizer_from_env
+from kg_utils.synthesis import (
+    image_synth_for_backend,
+    image_synthesizer_from_env,
+    text_synth_for_backend,
+    text_synthesizer_from_env,
+)
+from kg_utils.worker import handle_aux_ops
 
 # ---------------------------------------------------------------------------
 # Config
@@ -77,22 +84,15 @@ HANDLER_SECRET = os.environ.get("HANDLER_SECRET", "")
 _PEPYS_SQLITE = PEPYS_KG_ROOT / ".diarykg" / "graph.sqlite"
 _PEPYS_LANCEDB = PEPYS_KG_ROOT / ".diarykg" / "lancedb"
 
+# Populated at startup: the Pepys DiaryKG LanceDB table, used by the
+# semantic-first retrieval path (pure cosine ranking, no graph-hop expansion).
+_PEPYS_TABLE = None
+
 _PEPYS_RAG_SYSTEM = (
     "You are a knowledgeable guide to Samuel Pepys' diary. "
     "Answer the question using ONLY the provided diary excerpts. "
     "Be concise and specific. Quote dates when relevant."
 )
-
-
-def _normalize_omlx_endpoint(endpoint: str) -> str:
-    """Ensure oMLX endpoint is OpenAI-compatible base URL ending with /v1."""
-    ep = (endpoint or "").strip().rstrip("/")
-    if not ep:
-        return ""
-    if ep.endswith("/v1"):
-        return ep
-    return f"{ep}/v1"
-
 
 # ---------------------------------------------------------------------------
 # Startup
@@ -137,21 +137,32 @@ def _make_embedder():
     return emb
 
 
+def _open_pepys_table() -> None:
+    """Open the Pepys DiaryKG LanceDB table for semantic-first search."""
+    global _PEPYS_TABLE
+    if not _PEPYS_LANCEDB.exists():
+        print(f"[startup] WARNING: Pepys lancedb not found at {_PEPYS_LANCEDB}")
+        return
+    import lancedb
+
+    db = lancedb.connect(str(_PEPYS_LANCEDB))
+    names = list(db.table_names())
+    table = "dockg_nodes" if "dockg_nodes" in names else (names[0] if names else None)
+    if table is None:
+        print(f"[startup] WARNING: no lancedb table found in {_PEPYS_LANCEDB}")
+        return
+    _PEPYS_TABLE = db.open_table(table)
+    print(f"[startup] opened Pepys vector table: {table} ({_PEPYS_TABLE.count_rows()} rows)")
+
+
 print("[startup] bootstrapping registry ...")
 _registry = _bootstrap_registry()
 
 print("[startup] loading embedder ...")
 _embedder = _make_embedder()
 
-print("[startup] initialising KGRAG orchestrator ...")
-from kg_rag.orchestrator import KGRAG  # noqa: E402
-
-_kgrag = KGRAG(registry_path=REGISTRY_PATH, embedder=_embedder)
-
-print("[startup] initialising DiaryKG for content lookup ...")
-from diary_kg.kg import DiaryKG  # noqa: E402
-
-_diarykg = DiaryKG(root=PEPYS_KG_ROOT, model=EMBED_MODEL)
+print("[startup] opening Pepys vector table ...")
+_open_pepys_table()
 
 print("[startup] initialising synthesis backends ...")
 _text_synth = text_synthesizer_from_env()
@@ -165,66 +176,11 @@ print("[startup] ready")
 
 
 def _synth_for_backend(backend_str: str):
-    """Return a TextSynthesizer for the requested backend, using env-aware endpoints.
-
-    Falls back to the startup default synthesizer on unknown or empty backend_str.
-    """
-    from kg_utils.synthesis import TextSynthesizer
-    from kg_utils.synthesis._config import TextBackend, TextConfig
-
-    backend_str = (backend_str or "").strip().lower()
-    if not backend_str:
-        return _text_synth
-    try:
-        backend = TextBackend(backend_str)
-    except ValueError:
-        return _text_synth
-
-    if backend == TextBackend.OMLX:
-        endpoint = os.environ.get("SYNTH_ENDPOINT") or os.environ.get("VLLM_ENDPOINT_URL") or ""
-        endpoint = _normalize_omlx_endpoint(endpoint)
-        api_key = os.environ.get("SYNTH_API_KEY") or os.environ.get("VLLM_API_KEY") or ""
-        model = os.environ.get("SYNTH_MODEL") or os.environ.get("VLLM_MODEL") or ""
-        return TextSynthesizer(
-            TextConfig(backend=backend, endpoint=endpoint, api_key=api_key, model=model)
-        )
-    elif backend == TextBackend.OLLAMA:
-        endpoint = os.environ.get("OLLAMA_ENDPOINT") or ""
-        return TextSynthesizer(TextConfig(backend=backend, endpoint=endpoint))
-    elif backend == TextBackend.OPENAI:
-        api_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("SYNTH_API_KEY") or ""
-        return TextSynthesizer(TextConfig(backend=backend, api_key=api_key))
-
-    return _text_synth
+    return text_synth_for_backend(backend_str, _text_synth)
 
 
 def _image_for_backend(backend_str: str):
-    """Return an ImageSynthesizer for the requested image backend.
-
-    Falls back to the startup default on unknown or empty backend_str.
-    """
-    from kg_utils.synthesis import ImageSynthesizer
-    from kg_utils.synthesis._config import ImageBackend, ImageConfig
-
-    backend_str = (backend_str or "").strip().lower()
-    if not backend_str:
-        return _image_synth
-    try:
-        backend = ImageBackend(backend_str)
-    except ValueError:
-        return _image_synth
-
-    if backend == ImageBackend.OPENAI:
-        api_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("IMAGE_API_KEY") or ""
-        return ImageSynthesizer(ImageConfig(backend=backend, api_key=api_key))
-    elif backend == ImageBackend.MFLUX_SERVE:
-        server_url = os.environ.get("IMAGE_ENDPOINT") or ""
-        return ImageSynthesizer(ImageConfig(backend=backend, server_url=server_url))
-    elif backend == ImageBackend.MFLUX_LOCAL:
-        model = os.environ.get("IMAGE_MODEL") or os.environ.get("GUTENKG_IMAGE_MODEL") or ""
-        return ImageSynthesizer(ImageConfig(backend=backend, model=model))
-
-    return _image_synth
+    return image_synth_for_backend(backend_str, _image_synth)
 
 
 # ---------------------------------------------------------------------------
@@ -232,39 +188,95 @@ def _image_for_backend(backend_str: str):
 # ---------------------------------------------------------------------------
 
 
-def _hit_to_dict(hit) -> dict:
-    return {
-        "kg_name": hit.kg_name,
-        "kg_kind": str(hit.kg_kind),
-        "node_id": hit.node_id,
-        "name": hit.name,
-        "kind": hit.kind,
-        "score": round(float(hit.score), 4),
-        "summary": hit.summary,
-        "source_path": hit.source_path,
-    }
+def _table_search(table, qvec, where: str, k: int) -> list[dict]:
+    """Run a cosine kNN search with a pre-filter and return raw LanceDB rows."""
+    return table.search(qvec).metric("cosine").where(where, prefilter=True).limit(k).to_list()
 
 
-def _attach_content(hits: list[dict]) -> None:
-    """Attach each hit's full source text under a ``content`` key via batched SQLite lookup."""
+def _rows_to_hits(rows: list[dict], min_score: float) -> list[dict]:
+    """Shape LanceDB rows into hit dicts (clean content hydrated separately).
+
+    The LanceDB ``text`` column holds the structured *embed-text* (``KIND:/TITLE:/
+    FILE:/TEXT:`` prefixed), not the clean passage — so ``content``/``summary`` are
+    left empty here and filled from SQLite by ``_attach_diary_fields``.
+    """
+    hits: list[dict] = []
+    for row in rows:
+        score = round(1.0 - float(row.get("_distance", 1.0)), 4)
+        if score < min_score:
+            continue
+        hits.append(
+            {
+                "kg_name": "pepys",
+                "kg_kind": "KGKind.DIARY",
+                "node_id": row.get("id"),
+                "name": row.get("name") or row.get("title") or "",
+                "kind": row.get("kind", "chunk"),
+                "score": score,
+                "summary": "",
+                "source_path": row.get("file_path") or "",
+                "content": "",
+                "timestamp": None,
+            }
+        )
+    return hits
+
+
+def _attach_diary_fields(hits: list[dict]) -> None:
+    """Hydrate clean passage text and temporal ``timestamp`` from the Pepys SQLite."""
     ids = [h["node_id"] for h in hits if h.get("node_id")]
-    if not ids:
+    if not ids or not _PEPYS_SQLITE.exists():
         return
-    import sqlite3
-
-    db = getattr(_diarykg, "_db_path", None) or (PEPYS_KG_ROOT / ".diarykg" / "graph.sqlite")
-    text_by_id: dict[str, str] = {}
+    field_by_id: dict[str, tuple[str, str | None]] = {}
     try:
-        with sqlite3.connect(str(db)) as con:
+        with sqlite3.connect(str(_PEPYS_SQLITE)) as con:
             placeholders = ",".join("?" * len(ids))
-            for node_id, text in con.execute(
-                f"SELECT id, text FROM nodes WHERE id IN ({placeholders})", ids
-            ):
-                text_by_id[node_id] = text or ""
+            rows = con.execute(
+                f"SELECT id, text, timestamp FROM nodes WHERE id IN ({placeholders})", ids
+            )
+            for nid, text, ts in rows:
+                field_by_id[nid] = (text or "", ts)
     except Exception:  # noqa: BLE001
         return
     for h in hits:
-        h["content"] = text_by_id.get(h["node_id"], "")
+        node_id = h.get("node_id")
+        if isinstance(node_id, str):
+            text, ts = field_by_id.get(node_id, ("", None))
+        else:
+            text, ts = ("", None)
+        h["content"] = text
+        h["summary"] = text
+        h["timestamp"] = ts
+
+
+def _semantic_search(
+    query: str,
+    k: int,
+    min_score: float = 0.0,
+    semantic_floor: float = 0.0,
+) -> list[dict]:
+    """Pure dense (cosine) search over the Pepys DiaryKG vector table.
+
+    Ranks every chunk/section by its *own* semantic distance to the query — no
+    graph-hop expansion, so the best-matching diary passages surface on top
+    instead of inheriting a flat seed score from a few graph-expanded neighbours.
+
+    :param query: Natural-language query string.
+    :param k: Number of hits to return.
+    :param min_score: Drop hits whose cosine similarity is below this.
+    :param semantic_floor: If the best hit is below this, discard the whole set.
+    :returns: Hit dictionaries ranked best-first, shaped like ``hit_to_dict``.
+    """
+    if _PEPYS_TABLE is None:
+        return []
+    qvec = _embedder.embed_texts([query])[0]
+    where = "kind IN ('chunk', 'section')"
+    rows = _table_search(_PEPYS_TABLE, qvec, where, k)
+    hits = _rows_to_hits(rows, min_score)
+    _attach_diary_fields(hits)  # clean text + timestamp from SQLite
+    if semantic_floor > 0.0 and hits and hits[0]["score"] < semantic_floor:
+        return []
+    return hits
 
 
 # ---------------------------------------------------------------------------
@@ -278,43 +290,9 @@ def handler(job: dict) -> dict:
     if HANDLER_SECRET and inp.get("secret") != HANDLER_SECRET:
         return {"error": "unauthorized"}
 
-    if inp.get("op") == "models":
-        synth = _synth_for_backend(inp.get("backend", ""))
-        return {"models": synth.list_models(), "default": synth._cfg.resolved_model()}
-
-    if inp.get("op") == "rewrite":
-        text = (inp.get("text") or "").strip()
-        if not text:
-            return {"error": "rewrite requires a non-empty 'text'"}
-        synth = _synth_for_backend(inp.get("backend", ""))
-        model_override = (inp.get("model") or "").strip() or None
-        prompt, error = synth.rewrite_for_image(text, model=model_override)
-        return {"prompt": prompt, "error": error}
-
-    if inp.get("op") == "imagine":
-        prompt = (inp.get("prompt") or "").strip()
-        if not prompt:
-            return {"error": "imagine requires a non-empty 'prompt'"}
-        aspect = inp.get("aspect_ratio", "3:2")
-        seed = inp.get("seed")
-        steps = inp.get("steps")
-        img_synth = _image_for_backend(inp.get("image_backend", ""))
-        try:
-            b64 = img_synth.generate_b64(
-                prompt,
-                aspect_ratio=aspect,
-                seed=int(seed) if seed is not None else None,
-                steps=int(steps) if steps is not None else None,
-            )
-            return {
-                "image_b64": b64,
-                "prompt": prompt,
-                "aspect_ratio": aspect,
-                "image_model": img_synth._cfg.resolved_model(),
-                "image_backend": img_synth._cfg.backend.value,
-            }
-        except Exception as exc:  # noqa: BLE001
-            return {"error": f"image generation failed: {exc}"}
+    aux_result = handle_aux_ops(inp, _synth_for_backend, _image_for_backend)
+    if aux_result is not None:
+        return aux_result
 
     query = inp.get("query", "").strip()
     corpus = inp.get("corpus", "all")
@@ -330,22 +308,11 @@ def handler(job: dict) -> dict:
     if corpus not in ("diary", "all"):
         return {"error": f"unknown corpus {corpus!r}; choose: diary, all"}
 
-    from kg_rag.primitives import KGKind
-
-    kind_filter = [KGKind.DIARY] if corpus == "diary" else None
-
     t0_search = time.perf_counter()
 
-    result = _kgrag.query(
-        query,
-        k=k,
-        kinds=kind_filter,
-        min_score=min_score,
-        semantic_floor=semantic_floor,
-    )
-
-    hits = [_hit_to_dict(h) for h in result.hits]
-    _attach_content(hits)
+    # Semantic-first: rank chunks by their own cosine distance (no graph-hop
+    # expansion), so the truly closest diary passages surface on top.
+    hits = _semantic_search(query, k=k, min_score=min_score, semantic_floor=semantic_floor)
 
     search_ms = (time.perf_counter() - t0_search) * 1000
     print(f"[query] {len(hits)} matching results found in {search_ms:.0f}ms")
@@ -364,8 +331,8 @@ def handler(job: dict) -> dict:
     return {
         "query": query,
         "corpus": corpus,
-        "total_hits": result.total_hits,
-        "kgs_queried": result.kgs_queried,
+        "total_hits": len(hits),
+        "kgs_queried": 1,
         "hits": hits,
         "search_ms": round(search_ms),
         "synthesis": synthesis,

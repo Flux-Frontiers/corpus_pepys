@@ -6,23 +6,27 @@ Streamlit chat UI for the corpus_pepys KGRAG worker. Searches the
 DiaryKG index of Samuel Pepys' diary (1660–1669) and optionally
 synthesises answers via a local Ollama model.
 
-Run with:
+Run standalone (worker must be running first):
     streamlit run docker/chat.py
 
-The worker must be running first:
-    make run
+Or via docker compose:
+    docker compose --profile chat up
 """
 
 from __future__ import annotations
 
 import html
 import io
-import json
 import os
+import sys
 from pathlib import Path
 
 import httpx
 import streamlit as st
+
+sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
+
+from kg_utils.worker import WorkerClient, WorkerError
 
 _IN_DOCKER = os.path.exists("/.dockerenv")
 _HOST = "host.docker.internal" if _IN_DOCKER else "localhost"
@@ -39,6 +43,13 @@ _RESOLUTION_LABELS: dict[str, str] = {
     "Preview": "Preview  (768 × 512)",
     "Standard": "Standard  (1152 × 768)",
     "Full": "Full  (1536 × 1024)",
+}
+
+# Pixel dimensions sent to the image backend for each preset (all 3:2).
+_RESOLUTION_SIZES: dict[str, str] = {
+    "Preview": "768x512",
+    "Standard": "1152x768",
+    "Full": "1536x1024",
 }
 
 # ---------------------------------------------------------------------------
@@ -97,13 +108,13 @@ def _score_bar(score: float, width: int = 80) -> str:
     color = "#27AE60" if score >= 0.7 else "#F39C12" if score >= 0.4 else "#E74C3C"
     return (
         f"<div style='display:inline-block;vertical-align:middle;"
-        f"width:{width}px;height:8px;background:#2a2a3e;border-radius:4px;overflow:hidden;'>"
+        f"width:{width}px;height:8px;background:var(--secondary-background-color);border-radius:4px;overflow:hidden;'>"
         f"<div style='width:{pct}%;height:100%;background:{color};'></div></div>"
-        f"&nbsp;<small style='color:#aaa;font-size:10px;'>{score:.3f}</small>"
+        f"&nbsp;<small style='color:var(--text-color);opacity:0.6;font-size:10px;'>{score:.3f}</small>"
     )
 
 
-def _preview(text: str, n: int = 200) -> tuple[str, bool]:
+def _preview(text: str, n: int = 220) -> tuple[str, bool]:
     """Return (preview, truncated) — a clean ~n-char preview cut on a word boundary."""
     text = (text or "").strip()
     if len(text) <= n:
@@ -115,11 +126,11 @@ def _preview(text: str, n: int = 200) -> tuple[str, bool]:
 def _render_hit_card(hit: dict) -> None:
     node_kind = hit.get("kind", "")
     name = hit.get("name", "")
-    source = hit.get("source_path") or "—"
     score = float(hit.get("score", 0.0))
+    source = hit.get("source_path") or "—"
     # Show the real diary passage (content), falling back to the legacy summary.
     content = hit.get("content") or hit.get("summary") or ""
-    preview, truncated = _preview(content, 200)
+    preview, truncated = _preview(content, 220)
 
     esc_preview = html.escape(preview)
     details = ""
@@ -128,13 +139,16 @@ def _render_hit_card(hit: dict) -> None:
         details = (
             "<details style='margin-top:6px;'>"
             "<summary style='cursor:pointer;color:#D4A017;font-size:12px;'>📖 Full entry</summary>"
-            f"<div style='color:#ddd;font-size:13px;margin-top:6px;line-height:1.55;'>{esc_full}</div>"
+            f"<div style='color:var(--text-color);font-size:13px;margin-top:6px;"
+            f"line-height:1.55;'>{esc_full}</div>"
             "</details>"
         )
 
     st.markdown(
         f"""
-        <div style="background:#1e1e2e;border-left:4px solid {_DIARY_COLOR};
+        <div style="background:var(--secondary-background-color);border-left:4px solid {
+            _DIARY_COLOR
+        };
                     border-radius:6px;padding:10px 14px;margin-bottom:6px;">
           <span style='background:{_DIARY_COLOR};color:#fff;border-radius:4px;
                 padding:2px 9px;font-size:11px;font-weight:bold;font-family:monospace;'>
@@ -142,12 +156,19 @@ def _render_hit_card(hit: dict) -> None:
           &nbsp;
           {_node_kind_badge(node_kind)}
           &nbsp;&nbsp;
-          <b style="font-size:14px;color:#f0f0f0;">{name}</b>
+          <b style="font-size:14px;color:var(--text-color);">{html.escape(name)}</b>
           <br>
-          <span style="color:#888;font-size:11px;font-family:monospace;">📄 {source}</span>
+          <span style="color:var(--text-color);opacity:0.55;font-size:11px;
+                       font-family:monospace;">📄 {html.escape(source)}</span>
           &nbsp;&nbsp;
           {_score_bar(score)}
-          {"<br><span style='color:#ccc;font-size:12px;'>" + esc_preview + "</span>" if esc_preview else ""}
+          {
+            "<br><span style='color:var(--text-color);opacity:0.8;font-size:12px;'>"
+            + esc_preview
+            + "</span>"
+            if esc_preview
+            else ""
+        }
           {details}
         </div>
         """,
@@ -160,10 +181,6 @@ def _render_hit_card(hit: dict) -> None:
 # ---------------------------------------------------------------------------
 
 
-class WorkerError(Exception):
-    pass
-
-
 def _rewrite_via_worker(
     worker_url: str,
     text: str,
@@ -172,24 +189,7 @@ def _rewrite_via_worker(
     model: str = "",
 ) -> tuple[str, str | None]:
     """Ask the worker to rewrite a corpus passage into an image-generation prompt."""
-    payload: dict = {"input": {"op": "rewrite", "text": text}}
-    if backend:
-        payload["input"]["backend"] = backend
-    if model:
-        payload["input"]["model"] = model
-    if secret:
-        payload["input"]["secret"] = secret
-    try:
-        resp = httpx.post(
-            worker_url.rstrip("/") + "/runsync",
-            json=payload,
-            timeout=httpx.Timeout(connect=5.0, read=60.0, write=10.0, pool=5.0),
-        )
-        resp.raise_for_status()
-        out = resp.json().get("output", {})
-        return out.get("prompt", text), out.get("error")
-    except Exception as exc:  # noqa: BLE001
-        return text, str(exc)
+    return WorkerClient(worker_url, secret).rewrite(text, backend=backend, model=model)
 
 
 def _imagine_via_worker(
@@ -200,33 +200,16 @@ def _imagine_via_worker(
     image_backend: str = "",
     aspect_ratio: str = "3:2",
     steps: int | None = None,
+    size: str | None = None,
 ) -> tuple[str | None, str | None, str | None, str | None]:
     """Route image generation through the worker. Returns (b64, image_model, image_backend, error)."""
-    inp: dict[str, object] = {"op": "imagine", "prompt": prompt, "aspect_ratio": aspect_ratio}
-    if image_backend:
-        inp["image_backend"] = image_backend
-    if steps is not None:
-        inp["steps"] = steps
-    if secret:
-        inp["secret"] = secret
-    payload = {"input": inp}
-    try:
-        resp = httpx.post(
-            worker_url.rstrip("/") + "/runsync",
-            json=payload,
-            timeout=httpx.Timeout(connect=5.0, read=300.0, write=10.0, pool=5.0),
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        # RunPod wraps handler errors as {"status": "FAILED", "error": "..."}
-        if data.get("status") == "FAILED" or "error_type" in data:
-            return None, None, None, str(data.get("error", "worker failed"))
-        out = data.get("output", {})
-        if "error" in out:
-            return None, None, None, out["error"]
-        return out.get("image_b64"), out.get("image_model"), out.get("image_backend"), None
-    except Exception as exc:  # noqa: BLE001
-        return None, None, None, str(exc)
+    return WorkerClient(worker_url, secret).imagine(
+        prompt,
+        image_backend=image_backend,
+        aspect_ratio=aspect_ratio,
+        steps=steps,
+        size=size,
+    )
 
 
 def _query_worker(
@@ -241,71 +224,22 @@ def _query_worker(
     model: str = "",
     backend: str = "",
 ) -> dict:
-    payload: dict = {
-        "input": {
-            "query": query,
-            "corpus": "diary",
-            "k": k,
-            "min_score": min_score,
-            "semantic_floor": semantic_floor,
-            "synthesize": synthesize,
-        }
-    }
-    if model:
-        payload["input"]["model"] = model
-    if backend:
-        payload["input"]["backend"] = backend
-    if secret:
-        payload["input"]["secret"] = secret
-
-    resp = httpx.post(
-        worker_url.rstrip("/") + "/runsync",
-        json=payload,
-        timeout=httpx.Timeout(connect=5.0, read=600.0, write=30.0, pool=5.0),
+    return WorkerClient(worker_url, secret).query(
+        query,
+        corpus="diary",
+        k=k,
+        min_score=min_score,
+        semantic_floor=semantic_floor,
+        synthesize=synthesize,
+        model=model,
+        backend=backend,
     )
-    resp.raise_for_status()
-    data = resp.json()
-
-    if data.get("status") == "FAILED" or "error_type" in data:
-        error_data = data.get("error", data)
-        # RunPod serialises the error as a JSON string; decode it if so.
-        if isinstance(error_data, str):
-            try:
-                error_data = json.loads(error_data)
-            except (ValueError, TypeError):
-                raise WorkerError(error_data) from None
-        if isinstance(error_data, dict):
-            err_type = error_data.get("error_type", "Unknown")
-            err_msg = error_data.get("error_message", str(error_data))
-            raise WorkerError(f"{err_type}: {err_msg}")
-        raise WorkerError(str(error_data))
-
-    out = data.get("output", data)
-    # The worker may return a soft error in the output payload too.
-    if isinstance(out, dict) and isinstance(out.get("error"), str):
-        raise WorkerError(out["error"])
-    return out
 
 
 @st.cache_data(ttl=60, show_spinner=False)
 def _fetch_models(worker_url: str, secret: str, backend: str = "") -> tuple[list[str], str]:
     """Ask the worker which synthesis models are served. Returns (model_ids, default)."""
-    payload: dict = {"input": {"op": "models"}}
-    if backend:
-        payload["input"]["backend"] = backend
-    if secret:
-        payload["input"]["secret"] = secret
-    try:
-        resp = httpx.post(
-            worker_url.rstrip("/") + "/runsync",
-            json=payload,
-            timeout=httpx.Timeout(connect=5.0, read=20.0, write=5.0, pool=5.0),
-        )
-        resp.raise_for_status()
-        out = resp.json().get("output", {})
-        return out.get("models", []), out.get("default", "")
-    except Exception:  # noqa: BLE001
-        return [], ""
+    return WorkerClient(worker_url, secret).list_models(backend=backend)
 
 
 # ---------------------------------------------------------------------------
@@ -330,6 +264,8 @@ def _init_state() -> None:
         st.session_state.messages = []
     if "pending_query" not in st.session_state:
         st.session_state.pending_query = ""
+    if "synthesize" not in st.session_state:
+        st.session_state.synthesize = False
 
 
 # ---------------------------------------------------------------------------
@@ -363,7 +299,7 @@ def _render_sidebar() -> dict:
     )
     synthesize = st.sidebar.toggle(
         "Generate answer",
-        value=False,
+        key="synthesize",
         help="Generate a narrative answer via the configured LLM backend",
     )
 
@@ -405,11 +341,6 @@ def _render_sidebar() -> dict:
         index=0,
         help="Smaller = faster generation",
     )
-    aspect = st.sidebar.selectbox(
-        "Aspect ratio",
-        options=["3:2", "16:9", "1:1", "4:3", "9:16", "2:3"],
-        index=0,
-    )
     has_result = any(
         m.get("role") == "assistant" and m.get("result")
         for m in st.session_state.get("messages", [])
@@ -442,9 +373,11 @@ def _render_sidebar() -> dict:
         "🎨 Render response",
         use_container_width=True,
         disabled=not has_result,
-        help="Generate an illustration from the most recent result"
-        if has_result
-        else "Run a query first",
+        help=(
+            "Generate an illustration from the most recent result"
+            if has_result
+            else "Run a query first"
+        ),
     )
 
     st.sidebar.markdown("---")
@@ -468,7 +401,6 @@ def _render_sidebar() -> dict:
         "backend": backend,
         "model": model,
         "resolution": resolution,
-        "aspect": aspect,
         "render_clicked": render_clicked,
     }
 
@@ -681,7 +613,8 @@ def main() -> None:
                         prompt,
                         cfg["secret"],
                         image_backend=image_backend,
-                        aspect_ratio=cfg["aspect"],
+                        aspect_ratio="3:2",
+                        size=_RESOLUTION_SIZES.get(cfg["resolution"]),
                     )
                     img_ms = round((time.perf_counter() - t0_img) * 1000)
                     if img_error or not b64:
@@ -692,7 +625,7 @@ def main() -> None:
                         _open_image(out_path)
                         st.caption(
                             f"🖼️ {image_model or image_backend_used or 'unknown'}"
-                            f" · {cfg['resolution']} · {cfg['aspect']} · {img_ms:,} ms"
+                            f" · {cfg['resolution']} · {img_ms:,} ms"
                         )
                 except Exception as exc:  # noqa: BLE001
                     st.error(f"Image generation failed: {exc}")

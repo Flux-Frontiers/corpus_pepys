@@ -27,6 +27,7 @@ htmlcov/
 .env
 .envrc
 .venv
+.venv-image/
 venv/
 env/
 
@@ -55,6 +56,9 @@ data/*.json
 
 # Docker env
 docker/.env
+
+# IDE
+.vscode/
 
 # macOS
 .DS_Store
