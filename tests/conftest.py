@@ -66,6 +66,14 @@ _stub(
 # handle_aux_ops returns None by default → not an aux op, proceed to query path
 _stub("kg_utils.worker", handle_aux_ops=MagicMock(return_value=None))
 
+# Vector backends (sqlite-vec / LanceDB); handler picks one at startup based on
+# which store file exists — neither does in tests, so these are never opened.
+_stub(
+    "kg_utils.vector_backend",
+    SqliteVecBackend=MagicMock(),
+    LanceDBBackend=MagicMock(),
+)
+
 # ── lancedb ───────────────────────────────────────────────────────────────────
 _mock_ldb = _stub("lancedb")
 _mock_ldb.connect = MagicMock(return_value=MagicMock())

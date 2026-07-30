@@ -13,7 +13,7 @@ Volume layout (baked in at build time)
   /workspace/pepys/
     .diarykg/
       graph.sqlite
-      lancedb/
+      vectors.sqlite     # sqlite-vec store (doc-kg >=0.18); legacy: lancedb/
 
 Environment variables
 ---------------------
@@ -82,11 +82,16 @@ EMBED_MODEL = os.environ.get("EMBED_MODEL", "BAAI/bge-small-en-v1.5")
 HANDLER_SECRET = os.environ.get("HANDLER_SECRET", "")
 
 _PEPYS_SQLITE = PEPYS_KG_ROOT / ".diarykg" / "graph.sqlite"
+_PEPYS_VECTORS = PEPYS_KG_ROOT / ".diarykg" / "vectors.sqlite"
 _PEPYS_LANCEDB = PEPYS_KG_ROOT / ".diarykg" / "lancedb"
 
-# Populated at startup: the Pepys DiaryKG LanceDB table, used by the
-# semantic-first retrieval path (pure cosine ranking, no graph-hop expansion).
-_PEPYS_TABLE = None
+# Columns doc-kg persists alongside each vector (doc_kg.index._META_COLUMNS).
+_VECTOR_META_COLUMNS = ("kind", "name", "title", "file_path")
+
+# Populated at startup: the Pepys DiaryKG vector store (a kg_utils
+# VectorBackend), used by the semantic-first retrieval path (pure cosine
+# ranking, no graph-hop expansion).
+_PEPYS_STORE = None
 
 _PEPYS_RAG_SYSTEM = (
     "You are a knowledgeable guide to Samuel Pepys' diary. "
@@ -117,7 +122,8 @@ def _bootstrap_registry():
             repo_path=PEPYS_KG_ROOT,
             venv_path=Path("/usr"),
             sqlite_path=_PEPYS_SQLITE,
-            lancedb_path=_PEPYS_LANCEDB,
+            vectors_path=_PEPYS_VECTORS if _PEPYS_VECTORS.exists() else None,
+            lancedb_path=_PEPYS_LANCEDB if _PEPYS_LANCEDB.exists() else None,
             created_at=datetime.now(UTC),
             updated_at=datetime.now(UTC),
         )
@@ -137,22 +143,43 @@ def _make_embedder():
     return emb
 
 
-def _open_pepys_table() -> None:
-    """Open the Pepys DiaryKG LanceDB table for semantic-first search."""
-    global _PEPYS_TABLE
-    if not _PEPYS_LANCEDB.exists():
-        print(f"[startup] WARNING: Pepys lancedb not found at {_PEPYS_LANCEDB}")
-        return
-    import lancedb
+def _open_pepys_store() -> None:
+    """Open the Pepys DiaryKG vector store for semantic-first search.
 
-    db = lancedb.connect(str(_PEPYS_LANCEDB))
-    names = list(db.table_names())
-    table = "dockg_nodes" if "dockg_nodes" in names else (names[0] if names else None)
-    if table is None:
-        print(f"[startup] WARNING: no lancedb table found in {_PEPYS_LANCEDB}")
+    doc-kg >=0.18 writes a sqlite-vec sidecar (``vectors.sqlite``) next to
+    ``graph.sqlite``; older builds shipped a LanceDB directory instead.
+    Prefer the sqlite store, fall back to LanceDB for an un-rebuilt index.
+    """
+    global _PEPYS_STORE
+    from kg_utils.vector_backend import LanceDBBackend, SqliteVecBackend
+
+    dim = len(_embedder.embed_texts(["dimension probe"])[0])
+    if _PEPYS_VECTORS.exists():
+        store = SqliteVecBackend(
+            _PEPYS_VECTORS,
+            dim=dim,
+            meta_columns=_VECTOR_META_COLUMNS,
+            check_same_thread=False,
+        )
+        label = f"sqlite-vec ({_PEPYS_VECTORS})"
+    elif _PEPYS_LANCEDB.exists():
+        store = LanceDBBackend(
+            _PEPYS_LANCEDB,
+            table="dockg_nodes",
+            dim=dim,
+            meta_columns=_VECTOR_META_COLUMNS,
+        )
+        label = f"lancedb ({_PEPYS_LANCEDB})"
+    else:
+        print(f"[startup] WARNING: no Pepys vector store at {_PEPYS_VECTORS} or {_PEPYS_LANCEDB}")
         return
-    _PEPYS_TABLE = db.open_table(table)
-    print(f"[startup] opened Pepys vector table: {table} ({_PEPYS_TABLE.count_rows()} rows)")
+
+    n = store.count()
+    if n == 0:
+        print(f"[startup] WARNING: Pepys vector store is empty: {label}")
+        return
+    _PEPYS_STORE = store
+    print(f"[startup] opened Pepys vector store: {label} ({n} vectors)")
 
 
 print("[startup] bootstrapping registry ...")
@@ -161,8 +188,8 @@ _registry = _bootstrap_registry()
 print("[startup] loading embedder ...")
 _embedder = _make_embedder()
 
-print("[startup] opening Pepys vector table ...")
-_open_pepys_table()
+print("[startup] opening Pepys vector store ...")
+_open_pepys_store()
 
 print("[startup] initialising synthesis backends ...")
 _text_synth = text_synthesizer_from_env()
@@ -188,17 +215,13 @@ def _image_for_backend(backend_str: str):
 # ---------------------------------------------------------------------------
 
 
-def _table_search(table, qvec, where: str, k: int) -> list[dict]:
-    """Run a cosine kNN search with a pre-filter and return raw LanceDB rows."""
-    return table.search(qvec).metric("cosine").where(where, prefilter=True).limit(k).to_list()
-
-
 def _rows_to_hits(rows: list[dict], min_score: float) -> list[dict]:
-    """Shape LanceDB rows into hit dicts (clean content hydrated separately).
+    """Shape vector-store rows into hit dicts (clean content hydrated separately).
 
-    The LanceDB ``text`` column holds the structured *embed-text* (``KIND:/TITLE:/
-    FILE:/TEXT:`` prefixed), not the clean passage — so ``content``/``summary`` are
-    left empty here and filled from SQLite by ``_attach_diary_fields``.
+    The store's ``text`` column (when present) holds the structured *embed-text*
+    (``KIND:/TITLE:/FILE:/TEXT:`` prefixed), not the clean passage — so
+    ``content``/``summary`` are left empty here and filled from SQLite by
+    ``_attach_diary_fields``.
     """
     hits: list[dict] = []
     for row in rows:
@@ -255,7 +278,7 @@ def _semantic_search(
     min_score: float = 0.0,
     semantic_floor: float = 0.0,
 ) -> list[dict]:
-    """Pure dense (cosine) search over the Pepys DiaryKG vector table.
+    """Pure dense (cosine) search over the Pepys DiaryKG vector store.
 
     Ranks every chunk/section by its *own* semantic distance to the query — no
     graph-hop expansion, so the best-matching diary passages surface on top
@@ -267,11 +290,10 @@ def _semantic_search(
     :param semantic_floor: If the best hit is below this, discard the whole set.
     :returns: Hit dictionaries ranked best-first, shaped like ``hit_to_dict``.
     """
-    if _PEPYS_TABLE is None:
+    if _PEPYS_STORE is None:
         return []
     qvec = _embedder.embed_texts([query])[0]
-    where = "kind IN ('chunk', 'section')"
-    rows = _table_search(_PEPYS_TABLE, qvec, where, k)
+    rows = _PEPYS_STORE.search(qvec, k, where="kind IN ('chunk', 'section')")
     hits = _rows_to_hits(rows, min_score)
     _attach_diary_fields(hits)  # clean text + timestamp from SQLite
     if semantic_floor > 0.0 and hits and hits[0]["score"] < semantic_floor:

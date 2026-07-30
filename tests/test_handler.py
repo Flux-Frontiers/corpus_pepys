@@ -166,19 +166,16 @@ class TestAttachDiaryFields:
 
 
 class TestSemanticSearch:
-    def test_returns_empty_when_no_table(self):
-        with patch.object(handler, "_PEPYS_TABLE", None):
+    def test_returns_empty_when_no_store(self):
+        with patch.object(handler, "_PEPYS_STORE", None):
             assert handler._semantic_search("anything", k=5) == []
 
     def test_semantic_floor_discards_low_scoring_set(self):
-        mock_table = MagicMock()
-        mock_row = {"_distance": 0.9, "id": "low", "kind": "chunk"}
-        mock_table.search.return_value.metric.return_value.where.return_value.limit.return_value.to_list.return_value = [
-            mock_row
-        ]
+        mock_store = MagicMock()
+        mock_store.search.return_value = [{"_distance": 0.9, "id": "low", "kind": "chunk"}]
 
         with (
-            patch.object(handler, "_PEPYS_TABLE", mock_table),
+            patch.object(handler, "_PEPYS_STORE", mock_store),
             patch.object(handler, "_attach_diary_fields"),
         ):
             result = handler._semantic_search("test", k=5, semantic_floor=0.5)
@@ -210,7 +207,7 @@ class TestHandlerDispatch:
     def test_authorized_when_secret_correct(self):
         with (
             patch.object(handler, "HANDLER_SECRET", "s3cret"),
-            patch.object(handler, "_PEPYS_TABLE", None),
+            patch.object(handler, "_PEPYS_STORE", None),
         ):
             result = self._call(query="plague", secret="s3cret")
         assert "error" not in result
@@ -218,7 +215,7 @@ class TestHandlerDispatch:
     def test_no_secret_required_when_env_unset(self):
         with (
             patch.object(handler, "HANDLER_SECRET", ""),
-            patch.object(handler, "_PEPYS_TABLE", None),
+            patch.object(handler, "_PEPYS_STORE", None),
         ):
             result = self._call(query="fire")
         assert "error" not in result
@@ -243,7 +240,7 @@ class TestHandlerDispatch:
     def test_unknown_corpus_returns_error(self):
         with (
             patch.object(handler, "HANDLER_SECRET", ""),
-            patch.object(handler, "_PEPYS_TABLE", None),
+            patch.object(handler, "_PEPYS_STORE", None),
         ):
             result = self._call(query="test", corpus="books")
         assert "error" in result
@@ -252,7 +249,7 @@ class TestHandlerDispatch:
     def test_corpus_diary_accepted(self):
         with (
             patch.object(handler, "HANDLER_SECRET", ""),
-            patch.object(handler, "_PEPYS_TABLE", None),
+            patch.object(handler, "_PEPYS_STORE", None),
         ):
             result = self._call(query="great fire", corpus="diary")
         assert "error" not in result
@@ -260,7 +257,7 @@ class TestHandlerDispatch:
     def test_corpus_all_accepted(self):
         with (
             patch.object(handler, "HANDLER_SECRET", ""),
-            patch.object(handler, "_PEPYS_TABLE", None),
+            patch.object(handler, "_PEPYS_STORE", None),
         ):
             result = self._call(query="plague", corpus="all")
         assert "error" not in result
@@ -270,7 +267,7 @@ class TestHandlerDispatch:
     def test_response_has_required_keys(self):
         with (
             patch.object(handler, "HANDLER_SECRET", ""),
-            patch.object(handler, "_PEPYS_TABLE", None),
+            patch.object(handler, "_PEPYS_STORE", None),
         ):
             result = self._call(query="pepys diary")
         for key in ("query", "corpus", "total_hits", "kgs_queried", "hits", "search_ms"):
@@ -279,7 +276,7 @@ class TestHandlerDispatch:
     def test_query_echoed_in_response(self):
         with (
             patch.object(handler, "HANDLER_SECRET", ""),
-            patch.object(handler, "_PEPYS_TABLE", None),
+            patch.object(handler, "_PEPYS_STORE", None),
         ):
             result = self._call(query="naval office")
         assert result["query"] == "naval office"
@@ -287,7 +284,7 @@ class TestHandlerDispatch:
     def test_corpus_echoed_in_response(self):
         with (
             patch.object(handler, "HANDLER_SECRET", ""),
-            patch.object(handler, "_PEPYS_TABLE", None),
+            patch.object(handler, "_PEPYS_STORE", None),
         ):
             result = self._call(query="theatre", corpus="diary")
         assert result["corpus"] == "diary"
@@ -295,7 +292,7 @@ class TestHandlerDispatch:
     def test_empty_hits_when_no_table(self):
         with (
             patch.object(handler, "HANDLER_SECRET", ""),
-            patch.object(handler, "_PEPYS_TABLE", None),
+            patch.object(handler, "_PEPYS_STORE", None),
         ):
             result = self._call(query="anything")
         assert result["hits"] == []
@@ -304,7 +301,7 @@ class TestHandlerDispatch:
     def test_k_zero_clamped_to_one(self):
         with (
             patch.object(handler, "HANDLER_SECRET", ""),
-            patch.object(handler, "_PEPYS_TABLE", None),
+            patch.object(handler, "_PEPYS_STORE", None),
         ):
             result = self._call(query="test", k=0)
         assert "error" not in result
@@ -312,7 +309,7 @@ class TestHandlerDispatch:
     def test_synthesis_off_by_default(self):
         with (
             patch.object(handler, "HANDLER_SECRET", ""),
-            patch.object(handler, "_PEPYS_TABLE", None),
+            patch.object(handler, "_PEPYS_STORE", None),
         ):
             result = self._call(query="test")
         assert result["synthesis"] is None
@@ -322,7 +319,7 @@ class TestHandlerDispatch:
     def test_synthesis_called_when_requested(self):
         with (
             patch.object(handler, "HANDLER_SECRET", ""),
-            patch.object(handler, "_PEPYS_TABLE", None),
+            patch.object(handler, "_PEPYS_STORE", None),
         ):
             result = self._call(query="fire", synthesize=True)
         assert result["synthesis"] == "mock synthesis"

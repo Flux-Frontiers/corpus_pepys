@@ -27,7 +27,7 @@ make build-index
 ```
 
 Runs `diarykg build` over `data/pepys_enriched_full.txt` and writes the
-SQLite + LanceDB index to `.diarykg/` (~2 min on a Mac Mini).
+SQLite + sqlite-vec index (`graph.sqlite` + `vectors.sqlite`) to `.diarykg/` (~2 min on a Mac Mini).
 
 To rebuild from the raw parsed text instead:
 
@@ -36,7 +36,7 @@ make build-index CORPUS_SOURCE=data/pepys_clean.txt
 ```
 
 To reindex without re-ingesting (faster — skips the ingest pass, rebuilds
-SQLite + LanceDB from the existing `.diarykg/corpus/` files):
+SQLite + vectors.sqlite from the existing `.diarykg/corpus/` files):
 
 ```bash
 make reindex
@@ -93,7 +93,7 @@ data/pepys_clean.txt       (3,355 timestamped entries)
 data/pepys_enriched_full.txt   (7,282 enriched chunks)
         │
         ▼  make build-index
-  diarykg build             SQLite graph + LanceDB vector index
+  diarykg build             SQLite graph + sqlite-vec vector index
         │
         ▼
 .diarykg/                  Knowledge graph index
