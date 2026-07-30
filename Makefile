@@ -45,14 +45,14 @@ build-index:
 	@echo "Done. Index written to .diarykg/"
 
 # ------------------------------------------------------------------
-# Phase 2b: Re-index only — skip ingest, rebuild SQLite + LanceDB
+# Phase 2b: Re-index only — skip ingest, rebuild SQLite + vectors.sqlite
 # from the existing .diarykg/corpus/ .md files.
 #
 # SIMILAR_TO edges are disabled (--no-similar is hardcoded in
 # diarykg reindex). For a single-author diary corpus, all-pairs
 # similarity produces ~5M low-signal edges — same-author vocabulary
 # uniformity inflates cosine scores across unrelated entries. The
-# HAS_TOPIC / HAS_CATEGORY graph and the LanceDB ANN index already
+# HAS_TOPIC / HAS_CATEGORY graph and the sqlite-vec index already
 # capture thematic structure more cleanly.
 # ------------------------------------------------------------------
 reindex:

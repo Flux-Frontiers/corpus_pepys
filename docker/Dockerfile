@@ -11,6 +11,10 @@
 #
 # The pre-built .diarykg/ must exist at the repo root before building.
 
+# kgrag-worker publishes only :latest (no release tags on Docker Hub), so
+# DL3007 can't be satisfied by pinning; the KG packages that matter are pinned
+# explicitly below and override whatever the base image carries.
+# hadolint ignore=DL3007
 FROM egsuchanek/kgrag-worker:latest
 
 WORKDIR /app
@@ -19,15 +23,17 @@ WORKDIR /app
 # doc-kg MUST be pinned explicitly: it is an *optional/extra* dependency of
 # diary-kg, so a plain `pip install diary-kg` does NOT pull it — at runtime it
 # would otherwise come from the base image at an uncontrolled version.
-# diary-kg 0.93.0 + doc-kg 0.15.6 carry the FTS5/BM25 + RRF fusion that fixes
-# exact-phrase retrieval (e.g. "Parmazan cheese"); doc-kg<0.15.6 lacks
-# GraphStore.search_lexical and breaks the diary query path.
+# doc-kg >=0.18.2 stores vectors in file-shaped vectors.sqlite (LanceDB
+# retired) and honours an explicit vectors_path — the baked .diarykg/ index
+# MUST be rebuilt with these versions (make build-index) before build-image,
+# or the container ships an index the runtime can no longer read.
 # watchdog: faster Streamlit file-watching via native OS events (vs. polling).
-# kgmodule-utils 0.4.3 carries the image-size fix (Resolution picker pass-through).
-ARG KGMODULE_UTILS_VERSION=0.4.3
-ARG DIARY_KG_VERSION=0.93.1
-ARG DOC_KG_VERSION=0.15.6
-RUN pip install --no-cache-dir "kgmodule-utils[synthesis]==${KGMODULE_UTILS_VERSION}" "diary-kg==${DIARY_KG_VERSION}" "doc-kg==${DOC_KG_VERSION}" watchdog streamlit httpx openai
+ARG KGMODULE_UTILS_VERSION=0.9.0
+ARG DIARY_KG_VERSION=0.93.4
+ARG DOC_KG_VERSION=0.19.1
+# [sqlite-vec] extra: the runtime reader for vectors.sqlite — NOT pulled by a
+# plain install, and without it the handler cannot open the baked index.
+RUN pip install --no-cache-dir "kgmodule-utils[synthesis,sqlite-vec]==${KGMODULE_UTILS_VERSION}" "diary-kg==${DIARY_KG_VERSION}" "doc-kg==${DOC_KG_VERSION}" watchdog streamlit httpx openai
 
 # Pre-download the embedding model during build so the container never needs
 # to reach HuggingFace at runtime (network may be unavailable or restricted).

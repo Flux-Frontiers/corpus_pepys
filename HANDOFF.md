@@ -55,7 +55,7 @@ corpus_pepys/
 ```bash
 make build-corpus   # re-run DiaryTransformer (only if pepys_enriched_full.txt changes)
 make build-index    # full diarykg build from pepys_enriched_full.txt (~3 min)
-make reindex        # rebuild SQLite + LanceDB only, skip ingest (~1 min)
+make reindex        # rebuild SQLite + vectors.sqlite only, skip ingest (~1 min)
 make build-image    # docker build — bakes .diarykg/ into corpus-pepys:latest
 make run            # docker compose up -d  →  worker on localhost:8000
 make stop           # docker compose down
@@ -73,7 +73,7 @@ data/pepys_enriched_full.txt
         │
         ▼  make build-index
   diarykg build          DiaryTransformer ingest → .diarykg/corpus/*.md
-                         dockg build (--no-similar) → graph.sqlite + lancedb/
+                         dockg build (--no-similar) → graph.sqlite + vectors.sqlite
         │
         ▼  make build-image
   docker build           COPYs .diarykg/ into /workspace/pepys/
@@ -98,7 +98,7 @@ data/pepys_enriched_full.txt
 **SIMILAR_TO edges disabled** — `diarykg reindex` and `diarykg build` both pass
 `--no-similar` to `dockg build`. For a single-author corpus, all-pairs cosine
 similarity produces ~5M low-signal edges (same-author vocabulary uniformity
-inflates scores). The LanceDB ANN index and HAS_TOPIC graph already capture
+inflates scores). The sqlite-vec index and HAS_TOPIC graph already capture
 thematic structure.
 
 **Index baked into Docker image** — `.diarykg/` is copied into the image at

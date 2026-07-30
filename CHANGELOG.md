@@ -34,6 +34,27 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   need mflux model imports at startup
 
 ### Changed
+- **KG pins updated to the current fleet floors** (matching kgrag:
+  `kgmodule-utils>=0.8.0`, `doc-kg>=0.18.2`, `diary-kg>=0.93.2`):
+  `docker/Dockerfile` + `docker-compose.yml` now pin `kgmodule-utils 0.9.0`,
+  `diary-kg 0.93.4`, `doc-kg 0.19.1`; `pyproject.toml` floor bumped to
+  `kgmodule-utils[synthesis,sqlite-vec]>=0.9.0` (lock regenerated)
+- **Worker vector store ported from LanceDB to sqlite-vec**
+  (`docker/handler.py`). doc-kg ≥0.18 retires LanceDB: a fresh
+  `diarykg build` writes `.diarykg/vectors.sqlite` (a sqlite-vec sidecar)
+  instead of `.diarykg/lancedb/`. The handler now opens the store through
+  `kg_utils.vector_backend.SqliteVecBackend` and registers `vectors_path`
+  (not `lancedb_path`) with the KG registry. There is deliberately **no
+  LanceDB fallback** — a pre-0.18 baked index gets a loud startup warning
+  and empty results, not a silent legacy code path; lancedb is no longer
+  imported anywhere in this repo (the package itself still lands in the
+  image transitively: doc-kg/diary-kg hard-require it upstream). Search
+  results and scores are unchanged (`_distance` is cosine in both stores).
+  **The baked `.diarykg/` index must be rebuilt** (`make build-index`)
+  before the next `make build-image`.
+- `docker/Dockerfile`: the pip install now pulls the
+  `kgmodule-utils[sqlite-vec]` extra — `sqlite-vec` is optional upstream, so
+  a plain install cannot read `vectors.sqlite` without it
 - **Worker retrieval is now semantic-first** (`docker/handler.py`). Queries rank
   chunks by their *own* cosine distance via a direct LanceDB search
   (`metric("cosine")`, chunk/section pre-filter) instead of the KGRAG
