@@ -11,6 +11,10 @@
 #
 # The pre-built .diarykg/ must exist at the repo root before building.
 
+# kgrag-worker publishes only :latest (no release tags on Docker Hub), so
+# DL3007 can't be satisfied by pinning; the KG packages that matter are pinned
+# explicitly below and override whatever the base image carries.
+# hadolint ignore=DL3007
 FROM egsuchanek/kgrag-worker:latest
 
 WORKDIR /app
