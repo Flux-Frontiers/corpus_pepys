@@ -1,6 +1,6 @@
 """
 Stub heavy KGRAG dependencies so docker/handler.py can be imported in tests
-without a full KGRAG environment (no runpod, kg_rag, kg_utils, or lancedb).
+without a full KGRAG environment (no runpod, kg_rag, or kg_utils).
 
 Stubs are injected into sys.modules at collection time — before any test file
 does `import handler` — so handler.py's module-level startup code runs against
@@ -66,14 +66,6 @@ _stub(
 # handle_aux_ops returns None by default → not an aux op, proceed to query path
 _stub("kg_utils.worker", handle_aux_ops=MagicMock(return_value=None))
 
-# Vector backends (sqlite-vec / LanceDB); handler picks one at startup based on
-# which store file exists — neither does in tests, so these are never opened.
-_stub(
-    "kg_utils.vector_backend",
-    SqliteVecBackend=MagicMock(),
-    LanceDBBackend=MagicMock(),
-)
-
-# ── lancedb ───────────────────────────────────────────────────────────────────
-_mock_ldb = _stub("lancedb")
-_mock_ldb.connect = MagicMock(return_value=MagicMock())
+# sqlite-vec vector backend; the handler only opens it when vectors.sqlite
+# exists on disk — it doesn't in tests, so the stub is never instantiated.
+_stub("kg_utils.vector_backend", SqliteVecBackend=MagicMock())

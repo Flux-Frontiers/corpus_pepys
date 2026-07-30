@@ -1,7 +1,7 @@
 """Unit tests for docker/handler.py — pure helpers and handler dispatch.
 
-Heavy dependencies (runpod, kg_rag, kg_utils, lancedb) are stubbed by
-conftest.py so this suite runs without a full KGRAG environment.
+Heavy dependencies (runpod, kg_rag, kg_utils) are stubbed by conftest.py so
+this suite runs without a full KGRAG environment.
 """
 
 from __future__ import annotations

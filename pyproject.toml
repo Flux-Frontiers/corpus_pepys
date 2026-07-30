@@ -56,7 +56,7 @@ license = "Elastic-2.0"
 authors = [
     { name = "Eric G. Suchanek, PhD", email = "suchanek@mac.com" }
 ]
-keywords = ["knowledge-graph", "samuel-pepys", "diary", "nlp", "semantic-search", "lancedb"]
+keywords = ["knowledge-graph", "samuel-pepys", "diary", "nlp", "semantic-search", "sqlite-vec"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",

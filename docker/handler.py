@@ -13,7 +13,7 @@ Volume layout (baked in at build time)
   /workspace/pepys/
     .diarykg/
       graph.sqlite
-      vectors.sqlite     # sqlite-vec store (doc-kg >=0.18); legacy: lancedb/
+      vectors.sqlite     # sqlite-vec store (doc-kg >=0.18)
 
 Environment variables
 ---------------------
@@ -83,7 +83,6 @@ HANDLER_SECRET = os.environ.get("HANDLER_SECRET", "")
 
 _PEPYS_SQLITE = PEPYS_KG_ROOT / ".diarykg" / "graph.sqlite"
 _PEPYS_VECTORS = PEPYS_KG_ROOT / ".diarykg" / "vectors.sqlite"
-_PEPYS_LANCEDB = PEPYS_KG_ROOT / ".diarykg" / "lancedb"
 
 # Columns doc-kg persists alongside each vector (doc_kg.index._META_COLUMNS).
 _VECTOR_META_COLUMNS = ("kind", "name", "title", "file_path")
@@ -123,7 +122,6 @@ def _bootstrap_registry():
             venv_path=Path("/usr"),
             sqlite_path=_PEPYS_SQLITE,
             vectors_path=_PEPYS_VECTORS if _PEPYS_VECTORS.exists() else None,
-            lancedb_path=_PEPYS_LANCEDB if _PEPYS_LANCEDB.exists() else None,
             created_at=datetime.now(UTC),
             updated_at=datetime.now(UTC),
         )
@@ -144,42 +142,33 @@ def _make_embedder():
 
 
 def _open_pepys_store() -> None:
-    """Open the Pepys DiaryKG vector store for semantic-first search.
+    """Open the Pepys DiaryKG sqlite-vec store for semantic-first search.
 
     doc-kg >=0.18 writes a sqlite-vec sidecar (``vectors.sqlite``) next to
-    ``graph.sqlite``; older builds shipped a LanceDB directory instead.
-    Prefer the sqlite store, fall back to LanceDB for an un-rebuilt index.
+    ``graph.sqlite``.  A pre-0.18 LanceDB index is not supported — rebuild
+    with ``make build-index`` before baking the image.
     """
     global _PEPYS_STORE
-    from kg_utils.vector_backend import LanceDBBackend, SqliteVecBackend
+    from kg_utils.vector_backend import SqliteVecBackend
+
+    if not _PEPYS_VECTORS.exists():
+        print(f"[startup] WARNING: Pepys vector store not found at {_PEPYS_VECTORS}")
+        print("[startup]   Run 'make build-index' (doc-kg >=0.18) then rebuild the image.")
+        return
 
     dim = len(_embedder.embed_texts(["dimension probe"])[0])
-    if _PEPYS_VECTORS.exists():
-        store = SqliteVecBackend(
-            _PEPYS_VECTORS,
-            dim=dim,
-            meta_columns=_VECTOR_META_COLUMNS,
-            check_same_thread=False,
-        )
-        label = f"sqlite-vec ({_PEPYS_VECTORS})"
-    elif _PEPYS_LANCEDB.exists():
-        store = LanceDBBackend(
-            _PEPYS_LANCEDB,
-            table="dockg_nodes",
-            dim=dim,
-            meta_columns=_VECTOR_META_COLUMNS,
-        )
-        label = f"lancedb ({_PEPYS_LANCEDB})"
-    else:
-        print(f"[startup] WARNING: no Pepys vector store at {_PEPYS_VECTORS} or {_PEPYS_LANCEDB}")
-        return
-
+    store = SqliteVecBackend(
+        _PEPYS_VECTORS,
+        dim=dim,
+        meta_columns=_VECTOR_META_COLUMNS,
+        check_same_thread=False,
+    )
     n = store.count()
     if n == 0:
-        print(f"[startup] WARNING: Pepys vector store is empty: {label}")
+        print(f"[startup] WARNING: Pepys vector store is empty: {_PEPYS_VECTORS}")
         return
     _PEPYS_STORE = store
-    print(f"[startup] opened Pepys vector store: {label} ({n} vectors)")
+    print(f"[startup] opened Pepys vector store: {_PEPYS_VECTORS} ({n} vectors)")
 
 
 print("[startup] bootstrapping registry ...")

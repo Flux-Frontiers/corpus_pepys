@@ -43,12 +43,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (`docker/handler.py`). doc-kg ≥0.18 retires LanceDB: a fresh
   `diarykg build` writes `.diarykg/vectors.sqlite` (a sqlite-vec sidecar)
   instead of `.diarykg/lancedb/`. The handler now opens the store through
-  `kg_utils.vector_backend` — `SqliteVecBackend` when `vectors.sqlite`
-  exists, falling back to `LanceDBBackend` for an un-rebuilt legacy index —
-  and registers `vectors_path` (not just `lancedb_path`) with the KG
-  registry. Search results and scores are unchanged (`_distance` is cosine
-  in both backends). **The baked `.diarykg/` index must be rebuilt**
-  (`make build-index`) before the next `make build-image`.
+  `kg_utils.vector_backend.SqliteVecBackend` and registers `vectors_path`
+  (not `lancedb_path`) with the KG registry. There is deliberately **no
+  LanceDB fallback** — a pre-0.18 baked index gets a loud startup warning
+  and empty results, not a silent legacy code path; lancedb is no longer
+  imported anywhere in this repo (the package itself still lands in the
+  image transitively: doc-kg/diary-kg hard-require it upstream). Search
+  results and scores are unchanged (`_distance` is cosine in both stores).
+  **The baked `.diarykg/` index must be rebuilt** (`make build-index`)
+  before the next `make build-image`.
 - `docker/Dockerfile`: the pip install now pulls the
   `kgmodule-utils[sqlite-vec]` extra — `sqlite-vec` is optional upstream, so
   a plain install cannot read `vectors.sqlite` without it
