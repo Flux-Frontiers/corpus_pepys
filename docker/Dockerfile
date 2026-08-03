@@ -28,9 +28,10 @@ WORKDIR /app
 # MUST be rebuilt with these versions (make build-index) before build-image,
 # or the container ships an index the runtime can no longer read.
 # watchdog: faster Streamlit file-watching via native OS events (vs. polling).
-ARG KGMODULE_UTILS_VERSION=0.9.0
-ARG DIARY_KG_VERSION=0.93.4
-ARG DOC_KG_VERSION=0.19.1
+# Keep these in step with pyproject.toml and the rest of the fleet.
+ARG KGMODULE_UTILS_VERSION=0.10.0
+ARG DIARY_KG_VERSION=0.96.0
+ARG DOC_KG_VERSION=0.21.1
 # [sqlite-vec] extra: the runtime reader for vectors.sqlite — NOT pulled by a
 # plain install, and without it the handler cannot open the baked index.
 RUN pip install --no-cache-dir "kgmodule-utils[synthesis,sqlite-vec]==${KGMODULE_UTILS_VERSION}" "diary-kg==${DIARY_KG_VERSION}" "doc-kg==${DOC_KG_VERSION}" watchdog streamlit httpx openai
