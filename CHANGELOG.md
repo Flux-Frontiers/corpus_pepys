@@ -8,6 +8,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+
+### Changed
+
+### Removed
+
+### Fixed
+
+---
+
+## [0.5.0] — 2026-08-03
+
+### Added
 - **Apple `container` as an alternative runtime** — `make <target> RUNTIME=apple`
   drives Apple's native `container` CLI instead of Docker (Apple Silicon,
   macOS 26), mirroring gutenberg_kg. Docker stays the default; nothing changes

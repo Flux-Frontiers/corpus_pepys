@@ -1,55 +1,55 @@
-# Release Notes — v0.4.0
+# Release Notes — v0.5.0
 
 > Released: 2026-08-03
 
-This release fixes a worker that would not start, an index build that produced a
-container-unreadable index, and a resolution picker that had never actually
-changed anything. Underneath all three was the same cause: versions arriving
-from somewhere nobody had pinned. The Docker image no longer inherits a shared
-base, dropping from 10.9 GB to 3.6 GB along the way.
+corpus_pepys can now run without Docker. Apple's native `container` CLI is
+supported as an alternative runtime on Apple Silicon, driven by the same Make
+targets with a single extra flag. Docker remains the default and is unchanged.
 
 ## What changed
 
-**The image stands on its own.** It previously extended a fleet-wide
-`kgrag-worker` base that was corpus-agnostic and bulk-installed every corpus
-package, so this image carried Gutenberg and metabolomics code it never
-imported, a LanceDB stack it never read, and — critically — an unpinned `kg-rag`
-that shipped two years of API behind the handler. The worker crash-looped at
-startup on a `KGEntry` field that version had never heard of, while the chat
-container stayed up and made the stack look healthy. The image is now built from
-`python:3.12-slim` with every runtime package pinned explicitly. Installing
-CPU-only PyTorch before the KG stack removes 2.9 GB of NVIDIA runtime and 660 MB
-of Triton that a GPU-less container could never use.
+**A second container runtime.** `make <target> RUNTIME=apple` builds and runs
+the whole stack — worker, chat UI and the host-side image server — on Apple's
+`container` tool instead of Docker Desktop. The image is the same
+`docker/Dockerfile`, the index is the same, and query results are identical;
+only the orchestration differs. `make setup RUNTIME=apple` installs the CLI and
+starts its services, so a clean machine works from a fresh clone.
 
-**The index and the container now agree.** `make build-index` was invoking a
-globally installed `diarykg` — three packages behind what the container expected.
-Because doc-kg 0.18.2 changed the vector store layout, that combination silently
-produced an index the runtime could not open, surfacing as empty search results
-rather than an error. The build toolchain now lives in the project virtualenv,
-pinned by a new `[build]` extra, and `make check-pins` refuses to build an image
-whose runtime versions disagree with the lockfile that produced the index.
+Two things about that runtime bite quietly, and both are handled. Each container
+is its own VM, so memory is a hard ceiling rather than a share of one large
+Docker VM — the defaults would be far too small for torch, the embedder and a
+41K-node graph, so the targets pass 8 GB and 6 CPUs for the worker. And
+`host.docker.internal` does not resolve inside these VMs, so every host-facing
+endpoint is rewritten to the vmnet gateway before launch; without it, a
+configuration pointing at the LLM would simply return answers with no synthesis
+and no error. That gateway address is detected from the live network rather than
+hardcoded, because it varies by machine in ways the CLI version does not
+predict.
 
-**Image resolution works.** Choosing Preview or Standard in the chat app had no
-effect: the requested pixel size was parsed and then discarded in favour of the
-nearest of seven hardcoded aspect ratios, all but one of which mapped back to
-full size. Sizes now pass through untouched. Preview renders roughly six times
-faster as a result, since it is no longer quietly doing full-resolution work.
+**Quieter worker logs.** The runpod harness logged at `DEBUG`, echoing every
+handler response into the log and then truncating it at 4096 characters by
+cutting the middle out. On a five-hit query that silently dropped the middle
+result from the log while the actual response was complete — alarming to read
+and easy to mistake for lost data. Logging now defaults to `INFO`; set
+`RUNPOD_LOG_LEVEL=DEBUG` to restore the previous output.
 
-**Setup is one command.** `make install` prepares a working environment —
-runtime, build toolchain and the spaCy model that `build-index` requires and
-which cannot be declared as an ordinary dependency. `make install-dev` adds the
-test and lint tooling.
+**A corrected claim about image sizing.** The documentation stated that mflux
+rounds requested dimensions down to a multiple of 32. It is 16. The original
+figure was inferred from two measurements that happened to satisfy both rules,
+and has been confirmed against a live server using a size that distinguishes
+them.
 
 ## Upgrading
 
-Rebuild both artifacts, in order: `make install`, then `make build-index`, then
-`make build-image`. The index must be rebuilt before the image — `check-pins`
-will stop you if the versions have drifted, but it cannot tell whether the baked
-index is current.
+Nothing is required. Docker remains the default runtime and behaves exactly as
+before.
 
-If you consume `image_gen.generate()` directly, it now takes `size="WIDTHxHEIGHT"`
-in place of `aspect_ratio`. Any dimensions are accepted rather than seven fixed
-ratios; the model rounds each down to a multiple of 16.
+To try the Apple runtime you need Apple Silicon, macOS 26, and the `container`
+CLI — `make setup RUNTIME=apple` installs it via Homebrew if missing. Then add
+`RUNTIME=apple` to any container target. See
+[docs/APPLE_CONTAINERS.md](docs/APPLE_CONTAINERS.md) for the gateway caveat,
+per-VM sizing, and notes on reclaiming container disk space, which grows
+silently and is not cleaned up automatically.
 
 ---
 
