@@ -1,6 +1,11 @@
+[![CI](https://github.com/Flux-Frontiers/corpus_pepys/actions/workflows/ci.yml/badge.svg)](https://github.com/Flux-Frontiers/corpus_pepys/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.12%20%7C%203.13-blue.svg)](https://www.python.org/)
 [![License: Elastic-2.0](https://img.shields.io/badge/License-Elastic%202.0-blue.svg)](https://www.elastic.co/licensing/elastic-license)
-[![Version](https://img.shields.io/badge/version-0.1.1-blue.svg)](https://github.com/Flux-Frontiers/corpus_pepys/releases)
+[![Texts](https://img.shields.io/badge/texts-Public%20Domain-green.svg)](https://www.gutenberg.org/)
+[![Version](https://img.shields.io/badge/version-0.4.0-blue.svg)](https://github.com/Flux-Frontiers/corpus_pepys/releases)
+[![Entries](https://img.shields.io/badge/entries-3%2C355-orange.svg)](#the-corpus)
+[![Nodes](https://img.shields.io/badge/nodes-41.5K-green.svg)](#the-corpus)
+[![Edges](https://img.shields.io/badge/edges-334K-green.svg)](#the-corpus)
 [![Docker](https://img.shields.io/docker/v/egsuchanek/corpus-pepys?label=Docker%20Hub&color=2496ED)](https://hub.docker.com/r/egsuchanek/corpus-pepys)
 [![Poetry](https://img.shields.io/endpoint?url=https://python-poetry.org/badge/v0.json)](https://python-poetry.org/)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20531929.svg)](https://doi.org/10.5281/zenodo.20531929)
@@ -108,10 +113,10 @@ of the Royal Navy.
 | Metric | Value |
 |---|---|
 | Total entries | 3,355 |
-| Enriched chunks | 7,282 |
+| Enriched chunks | 7,285 |
 | Time span | 1660-01-01 → 1669-08-02 |
-| KG nodes | 41,738 |
-| KG edges | 564,311 |
+| KG nodes | 41,517 |
+| KG edges | 333,679 |
 
 ---
 
@@ -129,7 +134,8 @@ of the Royal Navy.
 
 ## Citation
 
-If you use this corpus or dataset in your research, please cite:
+If you use this corpus or dataset in your research, use GitHub's **Cite this
+repository** button or [`CITATION.cff`](CITATION.cff):
 
 ```bibtex
 @software{suchanek_corpus_pepys_2026,
@@ -138,7 +144,7 @@ If you use this corpus or dataset in your research, please cite:
                Interactive Semantic Knowledge Graph},
   year      = {2026},
   publisher = {Zenodo},
-  version   = {v0.1.1},
+  version   = {v0.4.0},
   doi       = {10.5281/zenodo.20531929},
   url       = {https://doi.org/10.5281/zenodo.20531929}
 }

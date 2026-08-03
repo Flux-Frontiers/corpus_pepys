@@ -1,21 +1,55 @@
-# Release Notes — v0.1.1
+# Release Notes — v0.4.0
 
-> Released: 2026-06-03
+> Released: 2026-08-03
 
-### Added
-- `docs/USER_GUIDE.md`: Non-technical walkthrough of the Pepys chat app — starting it, asking questions, reading passages and relevance bars, sidebar settings, and enabling written answers
-- `docs/API.md`: Developer-facing HTTP reference — endpoint, request/response schema, parameter table, examples, and LLM synthesis configuration
-- `Makefile`: `make serve-llm` target to start an oMLX synthesis backend on `:8080` (8000 is reserved for the worker)
-- `docker/handler.py`, `docker/docker-compose.yml`, `docker/.env.example`: `VLLM_API_KEY` bearer-token support for OpenAI-compatible synthesis endpoints
-- `README.md`: "Who was Samuel Pepys?" introduction and a Documentation section linking the User Guide and API Reference
+This release fixes a worker that would not start, an index build that produced a
+container-unreadable index, and a resolution picker that had never actually
+changed anything. Underneath all three was the same cause: versions arriving
+from somewhere nobody had pinned. The Docker image no longer inherits a shared
+base, dropping from 10.9 GB to 3.6 GB along the way.
 
-### Changed
-- Synthesis backend now defaults to oMLX (`http://host.docker.internal:8080`, model `Qwen3-4B-Instruct-2507-MLX-8bit`) instead of Ollama; Ollama remains documented as a cross-platform alternative
-- `docker/handler.py`: Auth header is now driven by `VLLM_API_KEY` (sent only when set) rather than the hardcoded `RUNPOD_API_KEY`
-- `README.md`: Slimmed to lead with the chat app; API reference and synthesis details moved into `docs/`
+## What changed
 
-### Removed
-- `docker/handler.py`, `docker/docker-compose.yml`, `docker/.env.example`: `RUNPOD_API_KEY` environment variable, replaced by `VLLM_API_KEY`
+**The image stands on its own.** It previously extended a fleet-wide
+`kgrag-worker` base that was corpus-agnostic and bulk-installed every corpus
+package, so this image carried Gutenberg and metabolomics code it never
+imported, a LanceDB stack it never read, and — critically — an unpinned `kg-rag`
+that shipped two years of API behind the handler. The worker crash-looped at
+startup on a `KGEntry` field that version had never heard of, while the chat
+container stayed up and made the stack look healthy. The image is now built from
+`python:3.12-slim` with every runtime package pinned explicitly. Installing
+CPU-only PyTorch before the KG stack removes 2.9 GB of NVIDIA runtime and 660 MB
+of Triton that a GPU-less container could never use.
+
+**The index and the container now agree.** `make build-index` was invoking a
+globally installed `diarykg` — three packages behind what the container expected.
+Because doc-kg 0.18.2 changed the vector store layout, that combination silently
+produced an index the runtime could not open, surfacing as empty search results
+rather than an error. The build toolchain now lives in the project virtualenv,
+pinned by a new `[build]` extra, and `make check-pins` refuses to build an image
+whose runtime versions disagree with the lockfile that produced the index.
+
+**Image resolution works.** Choosing Preview or Standard in the chat app had no
+effect: the requested pixel size was parsed and then discarded in favour of the
+nearest of seven hardcoded aspect ratios, all but one of which mapped back to
+full size. Sizes now pass through untouched. Preview renders roughly six times
+faster as a result, since it is no longer quietly doing full-resolution work.
+
+**Setup is one command.** `make install` prepares a working environment —
+runtime, build toolchain and the spaCy model that `build-index` requires and
+which cannot be declared as an ordinary dependency. `make install-dev` adds the
+test and lint tooling.
+
+## Upgrading
+
+Rebuild both artifacts, in order: `make install`, then `make build-index`, then
+`make build-image`. The index must be rebuilt before the image — `check-pins`
+will stop you if the versions have drifted, but it cannot tell whether the baked
+index is current.
+
+If you consume `image_gen.generate()` directly, it now takes `size="WIDTHxHEIGHT"`
+in place of `aspect_ratio`. Any dimensions are accepted rather than seven fixed
+ratios; the model rounds each down to a multiple of 32.
 
 ---
 

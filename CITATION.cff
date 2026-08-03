@@ -1,0 +1,47 @@
+cff-version: "1.2.0"
+message: "If you use this software, please cite it using the metadata below."
+type: software
+title: "corpus_pepys: The Diary of Samuel Pepys — Interactive Semantic Knowledge Graph"
+abstract: >
+  corpus_pepys turns the complete diary of Samuel Pepys (1660–1669) into a
+  standalone, queryable semantic knowledge graph. The 3,355 daily entries are
+  parsed, NLP-enriched and topic-classified into 7,285 chunks, then indexed as
+  a DiaryKG knowledge graph — 41,517 nodes, 333,679 edges — with a sqlite-vec
+  vector store for sub-second natural-language retrieval. The index is baked
+  into a self-contained Docker image and served through the KGRAG federated
+  query layer, requiring no index build, model download or network access at
+  run time.
+authors:
+  - family-names: Suchanek
+    given-names: "Eric G., PhD"
+    orcid: "https://orcid.org/0009-0009-0891-1507"
+    email: suchanek@flux-frontiers.com
+    affiliation: "Flux-Frontiers"
+version: "0.4.0"
+date-released: "2026-08-03"
+doi: "10.5281/zenodo.20531929"
+license-url: "https://www.elastic.co/licensing/elastic-license"
+repository-code: "https://github.com/Flux-Frontiers/corpus_pepys"
+url: "https://github.com/Flux-Frontiers/corpus_pepys"
+keywords:
+  - knowledge-graph
+  - samuel-pepys
+  - diary
+  - natural-language-processing
+  - semantic-search
+  - sqlite-vec
+  - restoration-london
+  - public-domain
+references:
+  - type: software
+    title: "DiaryKG: Semantic Knowledge Graph for Diary Corpora"
+    authors:
+      - family-names: Suchanek
+        given-names: "Eric G., PhD"
+    repository-code: "https://github.com/Flux-Frontiers/diary_kg"
+  - type: software
+    title: "KGRAG: Federated Knowledge Graph RAG"
+    authors:
+      - family-names: Suchanek
+        given-names: "Eric G., PhD"
+    repository-code: "https://github.com/Flux-Frontiers/KGRAG"

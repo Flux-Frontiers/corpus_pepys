@@ -8,6 +8,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+
+### Changed
+
+### Removed
+
+### Fixed
+
+---
+
+## [0.4.0] — 2026-08-03
+
+### Added
 - **`make check-pins`** (`scripts/check_pins.py`) — verifies the KG versions in
   `poetry.lock`, `docker/Dockerfile` ARGs and `docker-compose.yml` build args all
   agree, and is a prerequisite of `build-image`. The index is produced locally by
