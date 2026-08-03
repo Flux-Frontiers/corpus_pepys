@@ -78,9 +78,10 @@ def generate(
     :param size: Explicit ``"WIDTHxHEIGHT"`` in pixels (default 1536x1024). Any
         dimensions are accepted — this replaces the old fixed aspect-ratio
         lookup, which silently snapped every request to one of seven sizes.
-        Note the model rounds each dimension down to a multiple of 32 (999x333
-        renders as 992x320); the chat presets are all multiples of 32, so they
-        come back exactly as asked.
+        Note mflux rounds each dimension DOWN to a multiple of 16 ("Width and
+        height should be multiples of 16. Rounding down."), so 999x333 renders
+        as 992x320. Every chat preset is already a multiple of 16 and comes
+        back exactly as asked.
     :param seed: Random seed for reproducibility (random if omitted).
     :param output_path: If given, save the PNG here in addition to returning it.
     :param model_name: Override the HF model repo (default: mlx-community/flux2-klein-4b-4bit).

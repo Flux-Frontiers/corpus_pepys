@@ -49,7 +49,7 @@ index is current.
 
 If you consume `image_gen.generate()` directly, it now takes `size="WIDTHxHEIGHT"`
 in place of `aspect_ratio`. Any dimensions are accepted rather than seven fixed
-ratios; the model rounds each down to a multiple of 32.
+ratios; the model rounds each down to a multiple of 16.
 
 ---
 
