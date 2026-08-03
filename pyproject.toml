@@ -80,6 +80,18 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Corpus/index build toolchain — NOT needed to run the service, which only
+# reads the pre-built .diarykg/ index. Kept out of the runtime deps because
+# diary-kg drags in the full spaCy/thinc NLP stack.
+#
+# These floors MUST stay in step with the pins in docker/Dockerfile: the index
+# is produced here and consumed there, and doc-kg >=0.18.2 changed the vector
+# store layout (LanceDB retired → file-shaped vectors.sqlite). Building with a
+# version older than the container's emits an index it cannot open.
+build = [
+    "diary-kg>=0.96.0",
+    "doc-kg>=0.21.1",
+]
 dev = [
     "detect-secrets>=1.5.0",
     "ty>=0.0.41",

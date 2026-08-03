@@ -1,6 +1,7 @@
 # corpus_pepys — standalone KGRAG image for the Samuel Pepys DiaryKG
 #
-# Extends the kgrag-worker base image with:
+# Self-contained build from python:3.12-slim (no kgrag-worker base — everything
+# the worker imports comes from PyPI pins + this checkout):
 #   - the pre-built Pepys .diarykg/ index baked in at /workspace/pepys/
 #   - a Pepys-specific handler that registers the diary corpus
 #
@@ -10,31 +11,69 @@
 #   3. make run             — docker compose up
 #
 # The pre-built .diarykg/ must exist at the repo root before building.
+#
+# Why not FROM egsuchanek/kgrag-worker:latest any more:
+#   That base is shared across the fleet and corpus-agnostic. It bulk-installs
+#   wheels/*.whl, so this image inherited gutenberg-kg/metabo-kg/kg-snapshot it
+#   never used, plus an unpinned kg-rag that shipped at 0.7.0 — pre-dating
+#   KGEntry.vectors_path and crashing the worker at registry bootstrap. It also
+#   pulled LanceDB, which nothing here reads: this corpus is entirely
+#   sqlite-vec (handler.py opens vectors.sqlite via kg_utils.SqliteVecBackend).
 
-# kgrag-worker publishes only :latest (no release tags on Docker Hub), so
-# DL3007 can't be satisfied by pinning; the KG packages that matter are pinned
-# explicitly below and override whatever the base image carries.
-# hadolint ignore=DL3007
-FROM egsuchanek/kgrag-worker:latest
+FROM python:3.12-slim
 
 WORKDIR /app
 
-# Install diary-kg + doc-kg from PyPI (DiaryKG, DocKG, and the diarykg CLI).
-# doc-kg MUST be pinned explicitly: it is an *optional/extra* dependency of
-# diary-kg, so a plain `pip install diary-kg` does NOT pull it — at runtime it
-# would otherwise come from the base image at an uncontrolled version.
-# doc-kg >=0.18.2 stores vectors in file-shaped vectors.sqlite (LanceDB
-# retired) and honours an explicit vectors_path — the baked .diarykg/ index
-# MUST be rebuilt with these versions (make build-index) before build-image,
-# or the container ships an index the runtime can no longer read.
-# watchdog: faster Streamlit file-watching via native OS events (vs. polling).
-# Keep these in step with pyproject.toml and the rest of the fleet.
+# System libs needed by the sentence-transformers / pyarrow wheels.
+# libgomp1: OpenMP runtime for torch. libglib2.0-0: pulled in by the pyarrow
+# side of the doc-kg stack.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        libgomp1 \
+        libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+# CPU-only torch, installed BEFORE the KG stack that pulls it transitively.
+#
+# torch's default PyPI wheel for linux/aarch64 is a CUDA build. Nothing here
+# asks for it; it arrives silently through sentence-transformers. Under the
+# old base that cost 2.9 GB of nvidia-* plus 660 MB of triton in a container
+# reporting torch.cuda.is_available() == False.
+#
+# Its own RUN on purpose: --index-url REPLACES PyPI for the whole command, and
+# the PyTorch CPU index does not host kg-rag/doc-kg/diary-kg. Installing torch
+# first means the resolver below finds the requirement already satisfied and
+# leaves the CPU build in place. Keep this layer above the KG install so a pin
+# bump doesn't re-download torch.
+RUN pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu torch
+
+# runpod: serverless worker harness — handler.py imports it at module level and
+#         docker-compose runs `handler.py --rp_serve_api`. Previously inherited
+#         from the base image and never declared here.
+# kg-rag: KGRegistry/KGEntry + embedder wrapper. 0.11.0 is the floor for
+#         KGEntry.vectors_path, which handler.py passes at startup.
+# kgmodule-utils: the [sqlite-vec] extra supplies the sqlite_vec module the
+#         served vectors.sqlite store needs; [synthesis] backs kg_utils.synthesis.
+# doc-kg / diary-kg: DiaryKG index + query API (pull the heavy
+#         torch/sentence-transformers stack transitively).
+# pillow: chat.py lazily imports PIL to save generated images.
+# streamlit + httpx: chat UI. watchdog: native-event file watching.
+#
+# KEEP THESE >= THE FLOORS IN pyproject.toml [project.optional-dependencies].
+# They also move as a SET — diary-kg 0.96.0 requires doc-kg>=0.20.0 and
+# kgmodule-utils>=0.9.0, and these are `==` pins, so a stale one is a hard
+# resolution failure at build time rather than a silent upgrade at runtime.
+ARG KG_RAG_VERSION=0.11.0
 ARG KGMODULE_UTILS_VERSION=0.10.0
-ARG DIARY_KG_VERSION=0.96.0
 ARG DOC_KG_VERSION=0.21.1
-# [sqlite-vec] extra: the runtime reader for vectors.sqlite — NOT pulled by a
-# plain install, and without it the handler cannot open the baked index.
-RUN pip install --no-cache-dir "kgmodule-utils[synthesis,sqlite-vec]==${KGMODULE_UTILS_VERSION}" "diary-kg==${DIARY_KG_VERSION}" "doc-kg==${DOC_KG_VERSION}" watchdog streamlit httpx openai
+ARG DIARY_KG_VERSION=0.96.0
+RUN pip install --no-cache-dir \
+    "runpod>=1.7.0" \
+    "kg-rag==${KG_RAG_VERSION}" \
+    "kgmodule-utils[synthesis,sqlite-vec]==${KGMODULE_UTILS_VERSION}" \
+    "doc-kg==${DOC_KG_VERSION}" \
+    "diary-kg==${DIARY_KG_VERSION}" \
+    streamlit httpx watchdog openai pillow
 
 # Pre-download the embedding model during build so the container never needs
 # to reach HuggingFace at runtime (network may be unavailable or restricted).

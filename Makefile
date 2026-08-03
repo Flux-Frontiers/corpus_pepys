@@ -1,4 +1,9 @@
-.PHONY: help build-corpus build-index reindex build-image run stop down image-server chat up query serve-llm test lint clean
+.PHONY: help install install-dev install-model build-corpus build-index reindex build-image run stop down image-server chat up query serve-llm test lint clean
+
+# Bare `make` prints help rather than installing: a cold `make install` pulls
+# torch + the spaCy stack, which is not what a stray keystroke should trigger.
+# Declared explicitly so reordering targets can't silently change the default.
+.DEFAULT_GOAL := help
 
 CORPUS_SOURCE ?= data/pepys_enriched_full.txt
 IMAGE_NAME    ?= corpus-pepys
@@ -10,6 +15,8 @@ IMAGE_SERVER  = http://localhost:8090
 help:
 	@echo "corpus_pepys — Samuel Pepys DiaryKG"
 	@echo ""
+	@echo "  make install        Setup: runtime + NLP build toolchain + spaCy model"
+	@echo "  make install-dev    As above, plus dev tools (pytest, ruff, pre-commit)"
 	@echo "  make build-corpus   Transform raw text → enriched corpus (pepys_clean.txt → enriched)"
 	@echo "  make build-index    Full build: ingest + index from $(CORPUS_SOURCE)"
 	@echo "  make reindex        Re-index only (skip ingest, use existing corpus .md files)"
@@ -22,9 +29,43 @@ help:
 	@echo "  make clean          Remove generated index and image"
 
 # ------------------------------------------------------------------
+# Phase 0: build toolchain
+#
+# The corpus/index build tools live in the PROJECT venv, pinned by the
+# [build] extra to the same versions docker/Dockerfile installs. They are
+# deliberately NOT taken from a globally-installed diarykg: the index format
+# is version-sensitive, and a stale global env silently produces an index the
+# container cannot read.
+# ------------------------------------------------------------------
+# One-shot setup for a fresh clone: runtime + the NLP build toolchain + the
+# spaCy model. Dev tooling is deliberately excluded — `--without dev` is
+# required because Poetry installs the dev *group* by default.
+install:
+	poetry install --extras build --without dev
+	@$(MAKE) --no-print-directory install-model
+	@echo "Done. Environment ready."
+
+# Everything in `install` plus the dev tooling (pytest, ruff, pre-commit,
+# detect-secrets, ty). --all-extras covers the build + dev extras, and the
+# Poetry dev *group* comes along by default, so no --with is needed.
+# Required before `make test` / `make lint`: those call pytest and ruff, which
+# `make install` deliberately leaves out.
+install-dev:
+	poetry install --all-extras
+	@$(MAKE) --no-print-directory install-model
+	@echo "Done. Dev environment ready."
+
+# en_core_web_sm is a GitHub-hosted wheel, not a PyPI package, so it cannot be
+# declared as a normal dependency. No-op once present.
+install-model:
+	@poetry run python -c "import en_core_web_sm" 2>/dev/null \
+		|| (echo "Downloading spaCy model en_core_web_sm ..." \
+		    && poetry run python -m spacy download en_core_web_sm)
+
+# ------------------------------------------------------------------
 # Phase 1: NLP enrichment — parse + transform raw diary text
 # ------------------------------------------------------------------
-build-corpus:
+build-corpus: install-model
 	@echo "Running DiaryTransformer on data/pepys_clean.txt ..."
 	poetry run diary-transformer transform \
 		data/pepys_clean.txt \
@@ -37,9 +78,9 @@ build-corpus:
 # ------------------------------------------------------------------
 # Phase 2a: Full build — ingest + index from source text
 # ------------------------------------------------------------------
-build-index:
+build-index: install-model
 	@echo "Building DiaryKG index from $(CORPUS_SOURCE) ..."
-	diarykg build . \
+	poetry run diarykg build . \
 		--source $(CORPUS_SOURCE) \
 		--snapshot
 	@echo "Done. Index written to .diarykg/"
@@ -58,7 +99,7 @@ build-index:
 reindex:
 	@test -d .diarykg/corpus || (echo "ERROR: .diarykg/corpus not found — run 'make build-index' first" && exit 1)
 	@echo "Reindexing from existing corpus (no SIMILAR_TO scan) ..."
-	diarykg reindex .
+	poetry run diarykg reindex .
 	@echo "Done. Index rebuilt in .diarykg/"
 
 # ------------------------------------------------------------------
@@ -129,12 +170,15 @@ serve-llm:
 # ------------------------------------------------------------------
 # Tests & lint
 # ------------------------------------------------------------------
+# `poetry run` so these resolve inside the project venv rather than via PATH —
+# a global pytest/ruff would otherwise silently run instead. Both require
+# `make install-dev`; plain `make install` excludes the dev group.
 test:
-	pytest
+	poetry run pytest
 
 lint:
-	ruff check docker/ scripts/
-	ruff format --check docker/ scripts/
+	poetry run ruff check docker/ scripts/
+	poetry run ruff format --check docker/ scripts/
 
 # ------------------------------------------------------------------
 # Cleanup

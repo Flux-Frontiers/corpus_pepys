@@ -33,7 +33,43 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   is lazy-loaded on first generation request, so endpoint-only deployments don't
   need mflux model imports at startup
 
+- **`make install` / `make install-dev` / `make install-model`** — one-shot
+  environment setup. `install` gets the runtime plus the corpus/index build
+  toolchain (`--without dev`, since Poetry installs the dev *group* by default);
+  `install-dev` adds pytest/ruff/pre-commit/ty/detect-secrets via `--all-extras`.
+  Both run `install-model`, which downloads the `en_core_web_sm` spaCy model —
+  a GitHub-hosted wheel that cannot be declared as a normal dependency — and
+  no-ops once present
+- `pyproject.toml`: **`[build]` optional-dependency extra** (`diary-kg>=0.96.0`,
+  `doc-kg>=0.21.1`) — the corpus/index build toolchain, kept out of the runtime
+  deps because diary-kg pulls the full spaCy/thinc stack that the service, which
+  only reads a pre-built index, never needs
+- `Makefile`: explicit `.DEFAULT_GOAL := help`, so a bare `make` prints help
+  rather than triggering a multi-GB install, and reordering targets cannot
+  silently change the default
+
 ### Changed
+- **The image is now self-contained** (`docker/Dockerfile`) — built
+  `FROM python:3.12-slim` instead of extending `egsuchanek/kgrag-worker:latest`,
+  mirroring the gutenberg_kg worker. That base is shared and corpus-agnostic:
+  it bulk-installs `wheels/*.whl`, so this image inherited `gutenberg-kg`,
+  `metabo-kg` and `kg-snapshot` it never imported, LanceDB it never read, and an
+  unpinned `kg-rag`. CPU-only torch is now installed from the PyTorch CPU index
+  in its own layer *before* the KG stack, so `sentence-transformers` cannot
+  silently pull the CUDA wheel. **Image size 10.9 GB → 3.6 GB** (2.9 GB of
+  `nvidia-*` plus 660 MB of `triton` removed from a container that reports
+  `torch.cuda.is_available() == False`). `runpod` and `pillow` are now declared
+  explicitly — both were arriving from the base, and `handler.py` imports
+  `runpod` at module level while `chat.py` lazily imports `PIL`
+- **`make build-index` / `make reindex` now run `poetry run diarykg`** — they
+  previously invoked a *globally* installed `diarykg`, which was at
+  `diary-kg 0.93.2` / `doc-kg 0.15.8` / `kgmodule-utils 0.4.3` while the
+  container expected `0.96.0` / `0.21.1` / `0.10.0`. Since doc-kg 0.18.2 moved
+  vectors to file-shaped `vectors.sqlite`, the stale global env silently emitted
+  a LanceDB-era index the container could not open. The build toolchain now
+  lives in the project venv, pinned by the `[build]` extra
+- `Makefile`: `make test` and `make lint` call `poetry run pytest` / `poetry run
+  ruff` rather than resolving via `PATH`, where a global install would win
 - **KG pins updated to the current fleet floors** (matching kgrag:
   `kgmodule-utils>=0.8.0`, `doc-kg>=0.18.2`, `diary-kg>=0.93.2`):
   `docker/Dockerfile` + `docker-compose.yml` now pin `kgmodule-utils 0.9.0`,
@@ -79,7 +115,24 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   now send `corpus="diary"` (the handler never accepted `"pepys"`)
 - `.gitignore`: ignore `.vscode/`
 
+### Fixed
+- **Worker crash-looped at registry bootstrap** with
+  `TypeError: KGEntry.__init__() got an unexpected keyword argument
+  'vectors_path'`. `handler.py` passes `vectors_path=`, which exists only from
+  `kg-rag 0.11.0`, but `kg-rag` was never pinned — it came from the base image
+  at `0.7.0`, which predates the field and offers only `lancedb_path`. Now
+  pinned via a `KG_RAG_VERSION` build arg. The Streamlit container stayed *up*
+  while the worker died, so the stack looked healthy from `docker ps`
+- **`make build-index` failed outright** with `spaCy model not found`: nothing
+  installed `en_core_web_sm`, and `diary-kg` was absent from the project venv
+  entirely despite `make build-corpus` calling `poetry run diary-transformer`
+
 ### Removed
+- **Dependency on the `egsuchanek/kgrag-worker` base image** — with it go
+  `gutenberg-kg`, `metabo-kg` and `kg-snapshot` (never imported here), the
+  entire CUDA stack, and LanceDB. `lancedb` is now absent from the image
+  altogether, superseding the note above that it "still lands in the image
+  transitively" — that was true only of the old base
 - **KGRAG orchestrator from the worker query path** — `handler.py` no longer
   initialises `KGRAG`; retrieval is served directly from the LanceDB table
 - `docker/image_gen.py`: `vlm_rewrite()`, `generate_via_server()`, and
