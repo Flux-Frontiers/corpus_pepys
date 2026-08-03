@@ -80,7 +80,13 @@ jobs:
           dockerfile: docker/Dockerfile
           # DL3013: pip version pinning — managed by poetry.lock, not the Dockerfile
           # DL3059: consolidate RUN steps — embedding pre-download is intentionally layered
-          ignore: DL3013,DL3059
+          # DL3008: apt version pinning — libgomp1/libglib2.0-0 are stable Debian
+          #   runtime shared-libs pulled in only to satisfy the torch and pyarrow
+          #   wheels. Pinning them would break the build on every python:3.12-slim
+          #   refresh, and the base image digest is what actually fixes them. This
+          #   rule first applied when the image stopped extending kgrag-worker and
+          #   grew its own apt-get layer.
+          ignore: DL3013,DL3059,DL3008
 
       - name: Validate docker-compose syntax
         run: docker compose -f docker/docker-compose.yml config --quiet
