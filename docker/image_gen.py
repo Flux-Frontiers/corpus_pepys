@@ -24,15 +24,26 @@ if TYPE_CHECKING:
 _DEFAULT_MODEL = "mlx-community/flux2-klein-4b-4bit"
 _DEFAULT_STEPS = 4
 
-_ASPECT_SIZES: dict[str, tuple[int, int]] = {
-    "1:1": (1024, 1024),
-    "3:2": (1536, 1024),
-    "2:3": (1024, 1536),
-    "16:9": (1536, 864),
-    "9:16": (864, 1536),
-    "4:3": (1365, 1024),
-    "3:4": (1024, 1365),
-}
+_DEFAULT_DIMS: tuple[int, int] = (1536, 1024)
+
+
+def _parse_size(size: str | None) -> tuple[int, int] | None:
+    """Parse an explicit ``"WIDTHxHEIGHT"`` string into a ``(width, height)`` pair.
+
+    :param size: Size string such as ``"768x512"`` (case-insensitive ``x``), or None.
+    :returns: ``(width, height)`` when *size* parses to two positive ints, else None.
+    """
+    if not size:
+        return None
+    try:
+        w_str, h_str = size.lower().split("x", 1)
+        width, height = int(w_str), int(h_str)
+    except (ValueError, AttributeError):
+        return None
+    if width <= 0 or height <= 0:
+        return None
+    return width, height
+
 
 # Module-level model cache for image_server.py reuse
 _cached_model = None
@@ -55,7 +66,7 @@ def _load_model(model_name: str):
 def generate(
     prompt: str,
     *,
-    aspect_ratio: str = "3:2",
+    size: str | None = None,
     seed: int | None = None,
     output_path: str | Path | None = None,
     model_name: str | None = None,
@@ -64,7 +75,12 @@ def generate(
     """Generate an image locally via Flux2Klein (Apple Silicon / mflux).
 
     :param prompt: Text description of the image to generate.
-    :param aspect_ratio: One of 1:1, 3:2, 2:3, 16:9, 9:16, 4:3, 3:4.
+    :param size: Explicit ``"WIDTHxHEIGHT"`` in pixels (default 1536x1024). Any
+        dimensions are accepted — this replaces the old fixed aspect-ratio
+        lookup, which silently snapped every request to one of seven sizes.
+        Note the model rounds each dimension down to a multiple of 32 (999x333
+        renders as 992x320); the chat presets are all multiples of 32, so they
+        come back exactly as asked.
     :param seed: Random seed for reproducibility (random if omitted).
     :param output_path: If given, save the PNG here in addition to returning it.
     :param model_name: Override the HF model repo (default: mlx-community/flux2-klein-4b-4bit).
@@ -74,7 +90,7 @@ def generate(
     model_name = model_name or os.environ.get("GUTENKG_IMAGE_MODEL", _DEFAULT_MODEL)
     steps = steps or int(os.environ.get("IMAGE_STEPS", _DEFAULT_STEPS))
     seed = seed if seed is not None else random.randint(0, 2**31 - 1)
-    width, height = _ASPECT_SIZES.get(aspect_ratio, _ASPECT_SIZES["3:2"])
+    width, height = _parse_size(size) or _DEFAULT_DIMS
 
     model = _load_model(model_name)
     result = model.generate_image(

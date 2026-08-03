@@ -1,4 +1,4 @@
-.PHONY: help install install-dev install-model build-corpus build-index reindex build-image run stop down image-server chat up query serve-llm test lint clean
+.PHONY: help install install-dev install-model check-pins build-corpus build-index reindex build-image run stop down image-server chat up query serve-llm test lint clean
 
 # Bare `make` prints help rather than installing: a cold `make install` pulls
 # torch + the spaCy stack, which is not what a stray keystroke should trigger.
@@ -20,6 +20,7 @@ help:
 	@echo "  make build-corpus   Transform raw text → enriched corpus (pepys_clean.txt → enriched)"
 	@echo "  make build-index    Full build: ingest + index from $(CORPUS_SOURCE)"
 	@echo "  make reindex        Re-index only (skip ingest, use existing corpus .md files)"
+	@echo "  make check-pins     Verify lock/Dockerfile/compose KG pins agree"
 	@echo "  make build-image    Build Docker image (requires .diarykg/ from build-index)"
 	@echo "  make run            Start the KGRAG service on http://localhost:8000"
 	@echo "  make stop           Stop the service"
@@ -54,6 +55,14 @@ install-dev:
 	poetry install --all-extras
 	@$(MAKE) --no-print-directory install-model
 	@echo "Done. Dev environment ready."
+
+# The index is built here by the [build] extra and read by the container. Those
+# two must agree — doc-kg >=0.18.2 changed the vector store layout, so a builder
+# older than the runtime emits an index the container cannot open, and it fails
+# silently as empty results. `poetry update` moves the lock without touching the
+# Dockerfile ARGs; this is what catches that. A prerequisite of build-image.
+check-pins:
+	@poetry run python scripts/check_pins.py
 
 # en_core_web_sm is a GitHub-hosted wheel, not a PyPI package, so it cannot be
 # declared as a normal dependency. No-op once present.
@@ -105,7 +114,7 @@ reindex:
 # ------------------------------------------------------------------
 # Phase 3: Docker image — bakes .diarykg/ into the image
 # ------------------------------------------------------------------
-build-image:
+build-image: check-pins
 	@test -d .diarykg || (echo "ERROR: .diarykg/ not found — run 'make build-index' first" && exit 1)
 	docker build -f docker/Dockerfile -t $(IMAGE_NAME):latest .
 	@echo "Done. Image built: $(IMAGE_NAME):latest"

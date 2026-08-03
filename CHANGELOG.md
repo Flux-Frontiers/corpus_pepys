@@ -8,7 +8,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
-- **Test suite** (`tests/`) — 58 unit tests covering `docker/handler.py` and
+- **`make check-pins`** (`scripts/check_pins.py`) — verifies the KG versions in
+  `poetry.lock`, `docker/Dockerfile` ARGs and `docker-compose.yml` build args all
+  agree, and is a prerequisite of `build-image`. The index is produced locally by
+  the `[build]` extra and read by the container: since doc-kg >=0.18.2 changed the
+  vector store layout, a builder older than the runtime emits an index the
+  container cannot open, and it fails *silently* as empty results rather than an
+  error. The pyproject floors are deliberately not checked — they express intent,
+  while the lock is what `make install` resolves, so `poetry update` moving the
+  lock without the Dockerfile ARGs is the drift that matters. `kg-rag` is reported
+  but unchecked: it is container-only and has no lock entry
+- **Test suite** (`tests/`) — 57 unit tests covering `docker/handler.py` and
   `docker/image_gen.py`, runnable with no KGRAG environment:
   - `tests/conftest.py`: stubs `runpod`, `kg_rag`, `kg_utils`, and `lancedb`
     into `sys.modules` before import so handler.py's startup code runs against
@@ -17,9 +27,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     `_attach_diary_fields` (temp-SQLite hydration), `_semantic_search` (no-table
     guard, semantic-floor), and `handler()` dispatch (auth, query validation,
     corpus validation, response shape, synthesis on/off)
-  - `tests/test_image_gen.py` (22 tests): `_ASPECT_SIZES` completeness and
-    orientation, `_load_model` cache hit path, and `generate()` (aspect ratio
-    lookup + fallback, seed, output path, steps override)
+  - `tests/test_image_gen.py` (21 tests): `_parse_size` (valid, malformed,
+    non-positive), `_load_model` cache hit path, and `generate()` (size
+    passthrough, arbitrary sizes not snapped, every chat preset verbatim,
+    malformed-size fallback, seed, output path, steps override)
 - `Makefile`: `make test` (runs pytest) and `make lint` (ruff check + format
   check on `docker/` and `scripts/`) targets
 - `scripts/check_standard_queries.py` — validation harness that runs the eight
@@ -116,6 +127,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `.gitignore`: ignore `.vscode/`
 
 ### Fixed
+- **The chat Resolution picker was still inert — the other half of the fix.**
+  The preset was being *sent* correctly (fixed earlier), but
+  `docker/image_server.py` parsed `req.size` into pixels and then discarded it,
+  snapping to the nearest of seven hardcoded aspect ratios which
+  `image_gen.generate()` re-expanded through `_ASPECT_SIZES`. Only `1536x1024`
+  appeared in that map, so Preview (`768x512`) and Standard (`1152x768`) both
+  fell through to `3:2` and rendered at full size. `_ASPECT_SIZES` is replaced by
+  `image_gen._parse_size()`, `generate()` now takes `size="WIDTHxHEIGHT"` instead
+  of `aspect_ratio`, and the server passes `req.size` straight through — matching
+  the same fix in gutenberg_kg. Verified against a live FLUX server: all three
+  presets now render at the requested dimensions, and Preview dropped from 19.1s
+  to 3.2s because it is no longer doing full-size work in secret. Note the model
+  rounds each dimension down to a multiple of 32 (`999x333` → 992×320); every
+  preset is already a multiple of 32. `aspect_ratio` in `chat.py`'s
+  `_imagine_via_worker` is untouched — that is `kg_utils.WorkerClient.imagine()`'s
+  own signature, a separate path
 - **Worker crash-looped at registry bootstrap** with
   `TypeError: KGEntry.__init__() got an unexpected keyword argument
   'vectors_path'`. `handler.py` passes `vectors_path=`, which exists only from

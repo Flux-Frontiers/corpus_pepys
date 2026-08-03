@@ -1,4 +1,4 @@
-"""Unit tests for docker/image_gen.py — aspect-ratio table and generate() logic.
+"""Unit tests for docker/image_gen.py — size parsing and generate() logic.
 
 mflux (Apple Silicon) is only imported inside _load_model, so the module can
 be imported and tested without the full image stack.
@@ -10,56 +10,46 @@ from unittest.mock import MagicMock, patch
 
 import image_gen  # docker/ is on sys.path via conftest
 
-_DOCUMENTED_RATIOS = ["1:1", "3:2", "2:3", "16:9", "9:16", "4:3", "3:4"]
+# The resolution presets docker/chat.py sends. All three must reach the model
+# unchanged: they previously snapped to a fixed aspect-ratio table, and since
+# only 1536x1024 appeared in it, every preset rendered at full size.
+_CHAT_PRESETS = ["768x512", "1152x768", "1536x1024"]
 
 
 # ---------------------------------------------------------------------------
-# _ASPECT_SIZES
+# _parse_size
 # ---------------------------------------------------------------------------
 
 
-class TestAspectSizes:
-    def test_contains_all_documented_ratios(self):
-        for ratio in _DOCUMENTED_RATIOS:
-            assert ratio in image_gen._ASPECT_SIZES, f"missing ratio {ratio!r}"
+class TestParseSize:
+    def test_parses_plain_size(self):
+        assert image_gen._parse_size("768x512") == (768, 512)
 
-    def test_no_undocumented_ratios(self):
-        assert set(image_gen._ASPECT_SIZES) == set(_DOCUMENTED_RATIOS)
+    def test_parses_uppercase_x(self):
+        assert image_gen._parse_size("1536X1024") == (1536, 1024)
 
-    def test_all_values_are_two_positive_int_tuples(self):
-        for ratio, size in image_gen._ASPECT_SIZES.items():
-            assert isinstance(size, tuple) and len(size) == 2, f"{ratio}: not a 2-tuple"
-            w, h = size
-            assert isinstance(w, int) and w > 0, f"{ratio}: width invalid"
-            assert isinstance(h, int) and h > 0, f"{ratio}: height invalid"
+    def test_accepts_arbitrary_dimensions(self):
+        # The point of the change: any size, not one of seven fixed ratios.
+        assert image_gen._parse_size("999x333") == (999, 333)
 
-    def test_square_1_1_equal_dimensions(self):
-        w, h = image_gen._ASPECT_SIZES["1:1"]
-        assert w == h
+    def test_none_returns_none(self):
+        assert image_gen._parse_size(None) is None
 
-    def test_landscape_3_2_wider_than_tall(self):
-        w, h = image_gen._ASPECT_SIZES["3:2"]
-        assert w > h
+    def test_empty_string_returns_none(self):
+        assert image_gen._parse_size("") is None
 
-    def test_portrait_2_3_taller_than_wide(self):
-        w, h = image_gen._ASPECT_SIZES["2:3"]
-        assert h > w
+    def test_malformed_returns_none(self):
+        for bad in ("1536", "1536x", "x1024", "wide", "1536x1024x8", "12.5x10"):
+            assert image_gen._parse_size(bad) is None, f"{bad!r} should not parse"
 
-    def test_widescreen_16_9_wider_than_tall(self):
-        w, h = image_gen._ASPECT_SIZES["16:9"]
-        assert w > h
+    def test_non_positive_returns_none(self):
+        for bad in ("0x512", "768x0", "-768x512"):
+            assert image_gen._parse_size(bad) is None, f"{bad!r} should not parse"
 
-    def test_vertical_9_16_taller_than_wide(self):
-        w, h = image_gen._ASPECT_SIZES["9:16"]
-        assert h > w
-
-    def test_landscape_4_3_wider_than_tall(self):
-        w, h = image_gen._ASPECT_SIZES["4:3"]
-        assert w > h
-
-    def test_portrait_3_4_taller_than_wide(self):
-        w, h = image_gen._ASPECT_SIZES["3:4"]
-        assert h > w
+    def test_default_dims_are_two_positive_ints(self):
+        w, h = image_gen._DEFAULT_DIMS
+        assert isinstance(w, int) and w > 0
+        assert isinstance(h, int) and h > 0
 
 
 # ---------------------------------------------------------------------------
@@ -126,32 +116,37 @@ class TestGenerate:
             result = image_gen.generate("a peaceful river", seed=42)
         assert result is mock_pil
 
-    def test_default_aspect_ratio_3_2(self):
+    def test_default_size_when_omitted(self):
         _, mock_model = _setup_mock_model()
         with patch.object(image_gen, "_load_model", return_value=mock_model):
             image_gen.generate("test", seed=1)
-        w, h = image_gen._ASPECT_SIZES["3:2"]
+        w, h = image_gen._DEFAULT_DIMS
         kwargs = mock_model.generate_image.call_args.kwargs
         assert kwargs["width"] == w
         assert kwargs["height"] == h
 
-    def test_custom_aspect_ratio_portrait(self):
+    def test_explicit_size_reaches_model_unchanged(self):
         _, mock_model = _setup_mock_model()
         with patch.object(image_gen, "_load_model", return_value=mock_model):
-            image_gen.generate("portrait", aspect_ratio="2:3", seed=1)
-        w, h = image_gen._ASPECT_SIZES["2:3"]
+            image_gen.generate("portrait", size="1024x1536", seed=1)
         kwargs = mock_model.generate_image.call_args.kwargs
-        assert kwargs["width"] == w
-        assert kwargs["height"] == h
+        assert (kwargs["width"], kwargs["height"]) == (1024, 1536)
 
-    def test_unknown_aspect_ratio_falls_back_to_3_2(self):
+    def test_arbitrary_size_not_snapped_to_a_ratio(self):
+        # Regression: 999x333 matches no known aspect ratio. It used to fall
+        # back to 3:2 and render at 1536x1024.
         _, mock_model = _setup_mock_model()
         with patch.object(image_gen, "_load_model", return_value=mock_model):
-            image_gen.generate("test", aspect_ratio="99:1", seed=1)
-        w, h = image_gen._ASPECT_SIZES["3:2"]
+            image_gen.generate("test", size="999x333", seed=1)
         kwargs = mock_model.generate_image.call_args.kwargs
-        assert kwargs["width"] == w
-        assert kwargs["height"] == h
+        assert (kwargs["width"], kwargs["height"]) == (999, 333)
+
+    def test_malformed_size_falls_back_to_default(self):
+        _, mock_model = _setup_mock_model()
+        with patch.object(image_gen, "_load_model", return_value=mock_model):
+            image_gen.generate("test", size="not-a-size", seed=1)
+        kwargs = mock_model.generate_image.call_args.kwargs
+        assert (kwargs["width"], kwargs["height"]) == image_gen._DEFAULT_DIMS
 
     def test_explicit_seed_forwarded_to_model(self):
         _, mock_model = _setup_mock_model()
@@ -186,11 +181,14 @@ class TestGenerate:
             image_gen.generate("test", seed=1, steps=20)
         assert mock_model.generate_image.call_args.kwargs["num_inference_steps"] == 20
 
-    def test_all_ratios_produce_valid_dimensions(self):
-        for ratio in _DOCUMENTED_RATIOS:
+    def test_every_chat_preset_reaches_the_model_verbatim(self):
+        # The actual bug: Preview and Standard both rendered at 1536x1024
+        # because neither appeared in the aspect-ratio map.
+        for preset in _CHAT_PRESETS:
+            expected = tuple(int(v) for v in preset.split("x"))
             _, mock_model = _setup_mock_model()
             with patch.object(image_gen, "_load_model", return_value=mock_model):
-                image_gen.generate("test", aspect_ratio=ratio, seed=1)
-            w, h = image_gen._ASPECT_SIZES[ratio]
+                image_gen.generate("test", size=preset, seed=1)
             kwargs = mock_model.generate_image.call_args.kwargs
-            assert kwargs["width"] == w and kwargs["height"] == h, f"wrong dims for {ratio!r}"
+            got = (kwargs["width"], kwargs["height"])
+            assert got == expected, f"{preset}: rendered at {got}, expected {expected}"

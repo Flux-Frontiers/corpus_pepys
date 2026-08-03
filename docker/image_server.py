@@ -85,29 +85,17 @@ def list_models():
 
 @app.post("/v1/images/generations")
 async def generate_image(req: ImageGenRequest):
-    try:
-        width, height = map(int, req.size.split("x"))
-    except ValueError:
-        width, height = 1536, 1024
-
-    # Derive aspect ratio string from dimensions for image_gen.generate()
-    ratio_map = {
-        (1024, 1024): "1:1",
-        (1536, 1024): "3:2",
-        (1024, 1536): "2:3",
-        (1536, 864): "16:9",
-        (864, 1536): "9:16",
-        (1365, 1024): "4:3",
-        (1024, 1365): "3:4",
-    }
-    aspect = ratio_map.get((width, height), "3:2")
-
+    # req.size is passed straight through. It used to be parsed, then snapped to
+    # the nearest of seven known aspect ratios — which discarded the requested
+    # pixel size entirely. Only 1536x1024 was in that map, so the chat UI's
+    # Preview (768x512) and Standard (1152x768) presets both fell back to 3:2
+    # and rendered at full size, making the resolution picker inert.
     loop = asyncio.get_event_loop()
     pil = await loop.run_in_executor(
         None,
         lambda: image_gen.generate(
             req.prompt,
-            aspect_ratio=aspect,
+            size=req.size,
             seed=req.seed,
             model_name=_MODEL_NAME,
             steps=req.num_inference_steps or _DEFAULT_STEPS,
