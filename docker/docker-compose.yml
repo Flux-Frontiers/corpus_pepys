@@ -26,6 +26,12 @@ services:
       PEPYS_KG_ROOT: /workspace/pepys
       EMBED_MODEL: BAAI/bge-small-en-v1.5
       HANDLER_SECRET: ${HANDLER_SECRET:-}
+      # runpod defaults to DEBUG, which echoes the entire handler response into
+      # the logs — and its logger caps a message at 4096 chars, cutting the
+      # middle out with "...TRUNCATED N CHARACTERS...". That reads like results
+      # went missing when the HTTP response is in fact complete. Set to DEBUG
+      # to get it back.
+      RUNPOD_LOG_LEVEL: ${RUNPOD_LOG_LEVEL:-INFO}
       # Synthesis via a host LLM server (optional — omit to disable).
       # Defaults target oMLX on :8080; see docker/.env.example.
       VLLM_ENDPOINT_URL: ${VLLM_ENDPOINT_URL:-http://host.docker.internal:8080/v1}

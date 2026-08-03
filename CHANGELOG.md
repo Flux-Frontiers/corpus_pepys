@@ -8,12 +8,46 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **Apple `container` as an alternative runtime** — `make <target> RUNTIME=apple`
+  drives Apple's native `container` CLI instead of Docker (Apple Silicon,
+  macOS 26), mirroring gutenberg_kg. Docker stays the default; nothing changes
+  without the flag. `setup`, `build-image`, `run`, `up`, `down`, `logs` and
+  `clean` each have both implementations, while `image-server`, `chat`, `query`,
+  `test` and `lint` are shared because they run on the host either way. Per-VM
+  sizing is exposed as `WORKER_MEM` / `WORKER_CPUS` / `CHAT_MEM` (default 8g/6
+  and 4g) — each container is its own VM, so the CLI defaults are far too small
+  for torch + embedder + the 41K-node graph. `docker/.env` is sourced explicitly
+  to mirror compose's automatic loading. Verified end-to-end on CLI 1.1.0:
+  image built, worker opened 41,486 vectors, `make query` returned scores
+  identical to the Docker path, chat served on `:8501`
+- **`make setup`** for both runtimes — installs the `container` CLI via Homebrew
+  and runs `container system start` (idempotent, the once-per-boot step) under
+  `RUNTIME=apple`; verifies the Docker daemon is reachable otherwise
+- **`make logs`** — follows worker logs under either runtime
+- `docs/APPLE_CONTAINERS.md` — setup, the vmnet gateway caveat, per-VM sizing,
+  and disk-usage management. The Makefile header already referenced this file,
+  so that pointer previously dangled
 
 ### Changed
+- **`RUNPOD_LOG_LEVEL` now defaults to `INFO`** (`docker/docker-compose.yml`
+  and the Apple `run` target). runpod's logger defaults to `DEBUG`, which echoes
+  every handler response into the logs, and it caps a single message at 4096
+  chars — replacing the middle with `...TRUNCATED N CHARACTERS...`. On a 5-hit
+  query that silently drops the middle result *from the log*, which reads like
+  retrieval lost results when the HTTP response was complete all along. Set
+  `RUNPOD_LOG_LEVEL=DEBUG` to restore the old output
 
 ### Removed
 
 ### Fixed
+- **The mflux dimension-rounding rule was documented as 32; it is 16.**
+  `docker/image_gen.py`, the 0.4.0 changelog entry and `release-notes.md` all
+  claimed each dimension rounds down to a multiple of 32. mflux itself warns
+  "Width and height should be multiples of 16. Rounding down." The original
+  claim was inferred from two observations (999→992, 333→320) that satisfy both
+  rules and so could not distinguish them. Confirmed against a live server with
+  a discriminating case: `1008x512` — a multiple of 16 but not 32 — round-trips
+  unchanged
 
 ---
 
@@ -151,8 +185,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the same fix in gutenberg_kg. Verified against a live FLUX server: all three
   presets now render at the requested dimensions, and Preview dropped from 19.1s
   to 3.2s because it is no longer doing full-size work in secret. Note the model
-  rounds each dimension down to a multiple of 32 (`999x333` → 992×320); every
-  preset is already a multiple of 32. `aspect_ratio` in `chat.py`'s
+  rounds each dimension down to a multiple of 16 (`999x333` → 992×320); every
+  preset is already a multiple of 16. `aspect_ratio` in `chat.py`'s
   `_imagine_via_worker` is untouched — that is `kg_utils.WorkerClient.imagine()`'s
   own signature, a separate path
 - **Worker crash-looped at registry bootstrap** with
