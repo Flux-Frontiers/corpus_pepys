@@ -1,0 +1,60 @@
+name: Release
+
+# Mirrors the fleet release workflow (gutenberg_kg, doc_kg) with one deliberate
+# difference: there is no build step.
+#
+# Those repos ship an importable package (`packages = [{ include = ... }]`) and
+# upload a wheel + sdist. corpus_pepys sets `package-mode = false` and has no
+# src/ tree — it ships a corpus and a Docker image, not a distributable — so
+# `poetry build` fails outright with "Building a package is not possible in
+# non-package mode". Do not add it back expecting artifacts.
+#
+# The Docker image is published separately (make build-image && docker push);
+# this workflow only cuts the GitHub Release from the tagged commit.
+#
+# PLANNED: corpus_pepys is slated to become a package — docker/*.py moving to
+# src/corpus_pepys/serve/, the Dockerfile switching from loose COPYs to
+# `pip install .`. When that lands, restore the Poetry install + `poetry build`
+# steps and pass `dist/*` to `gh release create`, matching gutenberg_kg exactly.
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write # needed to create GitHub Releases
+
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # The tag and the version declared at the tagged commit must agree, or the
+      # Release is named for a version the code does not claim. With no build
+      # artifacts to catch a mismatch, this is the only guard the workflow has.
+      - name: Verify tag matches pyproject version
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          DECLARED=$(grep -m1 '^version = ' pyproject.toml | cut -d'"' -f2)
+          if [ "$TAG" != "$DECLARED" ]; then
+            echo "::error::tag v$TAG does not match pyproject.toml version $DECLARED"
+            exit 1
+          fi
+          echo "tag v$TAG matches pyproject.toml"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ github.ref_name }}"
+          if gh release view "$TAG" &>/dev/null; then
+            echo "Release $TAG already exists — updating notes"
+            gh release edit "$TAG" --notes-file release-notes.md
+          else
+            gh release create "$TAG" \
+              --title "corpus_pepys $TAG" \
+              --notes-file release-notes.md
+          fi
