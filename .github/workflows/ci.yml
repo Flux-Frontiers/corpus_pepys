@@ -39,6 +39,29 @@ jobs:
         run: ty check docker/
 
   # ---------------------------------------------------------------------------
+  # Tests
+  # pytest is the only install: tests/conftest.py stubs runpod, kg_rag and
+  # kg_utils into sys.modules at collection time, so the suite never imports
+  # the real KGRAG stack (and never pulls torch into CI).
+  # ---------------------------------------------------------------------------
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install pytest
+        run: pip install "pytest>=8.0.0"
+
+      - name: Run tests
+        run: pytest
+
+  # ---------------------------------------------------------------------------
   # Docker artefact validation
   # Full image build is skipped — it requires the baked-in .diarykg/ index
   # which is generated locally and gitignored.  We lint the Dockerfile with
