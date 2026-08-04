@@ -17,6 +17,45 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.5.1] — 2026-08-03
+
+### Fixed
+- **The chat model picker silently reverted to the provider default.** Neither
+  the Provider nor the Model selectbox in `docker/chat.py` carried a `key`, so
+  Streamlit derived each widget's identity from its parameters — including
+  `options` and `index`. Anything that changed those made it a *new* widget and
+  reset the selection: switching provider, or hitting **🔄 Refresh models**,
+  which clears the cache and refetches, potentially with a different order or
+  `default`.
+
+  The reset was invisible, which is the real damage. The sidebar showed the
+  default and `cfg["model"]` carried it into both the query and the image-prompt
+  rewrite, so answers came back from a model you had not chosen with nothing on
+  screen indicating the swap.
+
+  Both selectboxes now use explicit keys (`synth_provider`, `synth_model`) so
+  their values live in `st.session_state` and survive reruns. A reconcile step
+  runs *before* the Model widget renders — Streamlit raises if `session_state`
+  holds a value absent from `options`, exactly what a provider switch causes —
+  so the stored choice is validated first, kept when still available and
+  replaced by the provider default only when it genuinely vanished. The
+  empty-models path is unchanged: `list_models` swallows failures and returns
+  `([], "")`, the selectbox does not render, and `model` stays `""`
+- **`APPLE_HOST_GW` fell back to the wrong vmnet gateway.** The constant was
+  `192.168.65.1`, inherited from gutenberg_kg along with a comment claiming CLI
+  0.1.0 used `192.168.64.0/24` and 1.1.0 moved to `192.168.65.0/24`. That is
+  wrong: the `container-network-vmnet` plugin allocates `192.168.64.0/24` —
+  macOS's vmnet framework default — verified on CLI 1.1.0 against a network
+  created fresh by `container system start`, so it is the current allocation
+  rather than a leftover. `192.168.65.x` is *Docker Desktop's* gateway subnet,
+  the likely source of the number. Live detection already covered the normal
+  path, so this only bit on a cold start, when the runtime is not yet running
+  and the probe returns nothing — and it failed silently, with the worker unable
+  to reach the LLM and answers coming back with no synthesis rather than an
+  error
+
+---
+
 ## [0.5.0] — 2026-08-03
 
 ### Added

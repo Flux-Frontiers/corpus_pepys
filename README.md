@@ -2,7 +2,7 @@
 [![Python](https://img.shields.io/badge/python-3.12%20%7C%203.13-blue.svg)](https://www.python.org/)
 [![License: Elastic-2.0](https://img.shields.io/badge/License-Elastic%202.0-blue.svg)](https://www.elastic.co/licensing/elastic-license)
 [![Texts](https://img.shields.io/badge/texts-Public%20Domain-green.svg)](https://www.gutenberg.org/)
-[![Version](https://img.shields.io/badge/version-0.5.0-blue.svg)](https://github.com/Flux-Frontiers/corpus_pepys/releases)
+[![Version](https://img.shields.io/badge/version-0.5.1-blue.svg)](https://github.com/Flux-Frontiers/corpus_pepys/releases)
 [![Entries](https://img.shields.io/badge/entries-3%2C355-orange.svg)](#the-corpus)
 [![Nodes](https://img.shields.io/badge/nodes-41.5K-green.svg)](#the-corpus)
 [![Edges](https://img.shields.io/badge/edges-334K-green.svg)](#the-corpus)
@@ -144,7 +144,7 @@ repository** button or [`CITATION.cff`](CITATION.cff):
                Interactive Semantic Knowledge Graph},
   year      = {2026},
   publisher = {Zenodo},
-  version   = {v0.5.0},
+  version   = {v0.5.1},
   doi       = {10.5281/zenodo.20531929},
   url       = {https://doi.org/10.5281/zenodo.20531929}
 }
