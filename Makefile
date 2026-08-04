@@ -48,16 +48,30 @@ CHAT_MEM    ?= 4g
 # forwarded and reachable at localhost, same as the Docker path. But
 # host.docker.internal does NOT resolve inside these VMs, so anything pointing
 # at the host — the oMLX/Ollama LLM, the FLUX image server, chat->worker — must
-# use the vmnet gateway instead. That subnet is NOT stable across CLI versions
-# (0.1.0 used 192.168.64.0/24; 1.1.0 uses 192.168.65.0/24), which silently
-# breaks synthesis whenever it shifts, so detect it from the live `default`
-# network and fall back to the 1.1.0 default when the runtime isn't up yet.
-# Override with `make APPLE_HOST_GW=… …` if needed. Host services must bind
-# 0.0.0.0, not 127.0.0.1, to be reachable over the vmnet.
+# use the vmnet gateway instead. Getting it wrong fails silently: the worker
+# simply cannot reach the LLM, so you get answers with no synthesis and no
+# error. So detect it from the live `default` network, and treat the constant
+# purely as a cold-start fallback for when the runtime is not yet running.
+#
+# The fallback is 192.168.64.1 because that is what the `container-network-vmnet`
+# plugin actually allocates — macOS's vmnet framework defaults to
+# 192.168.64.0/24. Verified on CLI 1.1.0 against a network created fresh by
+# `container system start`, not a leftover from an older CLI:
+#
+#   $ container network list
+#   NETWORK  SUBNET
+#   default  192.168.64.0/24
+#
+# gutenberg_kg carries 192.168.65.1 here with a comment claiming CLI 1.1.0 moved
+# to 192.168.65.0/24. That is wrong — 192.168.65.x is *Docker Desktop's* gateway
+# subnet, which is where the number appears to have come from. Do not copy it
+# back. Override per-machine with `make APPLE_HOST_GW=… …` if yours differs.
+#
+# Host services must bind 0.0.0.0, not 127.0.0.1, to be reachable over the vmnet.
 ifeq ($(RUNTIME),apple)
-APPLE_HOST_GW ?= $(or $(shell container network inspect default 2>/dev/null | sed -n 's/.*"ipv4Gateway" : "\([0-9.]*\)".*/\1/p' | head -1),192.168.65.1)
+APPLE_HOST_GW ?= $(or $(shell container network inspect default 2>/dev/null | sed -n 's/.*"ipv4Gateway" : "\([0-9.]*\)".*/\1/p' | head -1),192.168.64.1)
 else
-APPLE_HOST_GW ?= 192.168.65.1
+APPLE_HOST_GW ?= 192.168.64.1
 endif
 
 help:
