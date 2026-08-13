@@ -447,3 +447,44 @@ class TestStats:
             assert handler.handler({"input": {"op": "stats"}}) == {"error": "unauthorized"}
             ok = handler.handler({"input": {"op": "stats", "secret": "s3cret"}})
         assert ok["entries"] == 1
+
+
+class TestSynthesisFailureDegrades:
+    """A failed synthesis must not discard a search that already succeeded."""
+
+    @staticmethod
+    def _call(**inp):
+        return handler.handler({"input": inp})
+
+    def test_backend_failure_reported_not_raised(self):
+        boom = MagicMock(side_effect=RuntimeError("connection refused"))
+        with (
+            patch.object(handler, "HANDLER_SECRET", ""),
+            patch.object(handler, "_PEPYS_STORE", None),
+            patch.object(handler._text_synth, "synthesize_rag", boom),
+        ):
+            result = self._call(query="fire", synthesize=True)
+
+        assert result["synthesis"] is None
+        assert result["synthesis_error"] == "RuntimeError: connection refused"
+        # The search half of the response survives intact.
+        assert "hits" in result
+        assert result["search_ms"] is not None
+        assert result["synthesis_ms"] is not None
+
+    def test_successful_synthesis_leaves_error_none(self):
+        with (
+            patch.object(handler, "HANDLER_SECRET", ""),
+            patch.object(handler, "_PEPYS_STORE", None),
+        ):
+            result = self._call(query="fire", synthesize=True)
+        assert result["synthesis"] == "mock synthesis"
+        assert result["synthesis_error"] is None
+
+    def test_key_present_and_none_when_synthesis_not_requested(self):
+        with (
+            patch.object(handler, "HANDLER_SECRET", ""),
+            patch.object(handler, "_PEPYS_STORE", None),
+        ):
+            result = self._call(query="fire")
+        assert result["synthesis_error"] is None

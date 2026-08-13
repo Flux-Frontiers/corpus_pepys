@@ -96,6 +96,14 @@ everywhere they disagreed was either a bug here or a trap waiting to become one.
   it in — so with a secret configured, the worker answered every chat query with
   `{"error": "unauthorized"}` while `curl` and `make query` kept working. Both
   paths now forward it. (`gutenberg_kg` has the same gap in its chat service.)
+- **A failed synthesis threw away a search that had already succeeded.**
+  `handler.py` called `synthesize_rag` unguarded, so an unreachable LLM server,
+  an unloaded model or a timeout propagated out of the handler and failed the
+  whole query — discarding hits that had already been retrieved. It now catches
+  the failure and returns it as `synthesis_error` alongside the results, which
+  is what `chat.py`'s "Answer generation failed" branch has always rendered:
+  that branch was unreachable because nothing ever set the key. `gutenberg_kg`
+  carried the identical dead path and has been fixed the same way.
 - **`docs/API.md` documented a corpus scope the worker rejects.** It advertised
   `"corpus": "pepys"` in the schema, the field table, the sample response and the
   curl example; the handler accepts only `diary` and `all`, so every documented

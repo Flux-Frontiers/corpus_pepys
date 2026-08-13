@@ -211,9 +211,5 @@ declared floor.
   the four KG packages move as a set, so this is a deliberate bump, not a drift fix.
 - Consider adding a `diarykg mcp` service to the compose stack so the corpus is
   queryable from Claude Code over MCP.
-- `synthesis_error` is read by `chat.py` but never set by `handler.py` — the
-  "answer generation failed" branch is currently unreachable. Either have the
-  handler catch synthesis failures and populate it, or drop the branch.
-  `gutenberg_kg` has the same dead path.
 - Richer synthesis prompts — the RAG system prompt is deliberately terse; longer
   passage context may improve answer quality at some latency cost.
