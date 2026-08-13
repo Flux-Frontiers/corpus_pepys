@@ -98,8 +98,8 @@ that answer them; no command line required.
 | `config/` | Topic classification YAML — 30+ Pepys-specific categories |
 | `docker/` | Dockerfile, handler, docker-compose, and Streamlit chat UI |
 | `docs/` | User guide, API reference, and build instructions |
-| `analysis/` | Run summaries with corpus statistics |
-| `scripts/` | Source processing scripts (parse, classify, analyse) |
+| `scripts/` | Source processing scripts (parse, classify, analyse) plus `check_pins.py` |
+| `tests/` | Unit tests for the handler, chat UI, and image generation |
 
 ---
 
@@ -113,7 +113,7 @@ of the Royal Navy.
 | Metric | Value |
 |---|---|
 | Total entries | 3,355 |
-| Enriched chunks | 7,285 |
+| Enriched chunks | 7,282 |
 | Time span | 1660-01-01 → 1669-08-02 |
 | KG nodes | 41,517 |
 | KG edges | 333,679 |

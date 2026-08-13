@@ -45,6 +45,8 @@ Request schema
   "op":             str   — "models"  → {"models": [...], "default": ...}
                             "rewrite" → {"prompt": "...", "error": ...}
                             "imagine" → {"image_b64": "...", "prompt": ..., "aspect_ratio": ...}
+                            "stats"   → {"entries", "chunks", "nodes", "edges",
+                                         "vectors", "embed_model"}
   "text":           str   — passage to rewrite (required when op="rewrite")
   "prompt":         str   — image prompt (required when op="imagine")
   "aspect_ratio":   str   — one of 1:1 3:2 2:3 16:9 9:16 4:3 3:4  (default: 3:2)
@@ -261,6 +263,40 @@ def _attach_diary_fields(hits: list[dict]) -> None:
         h["timestamp"] = ts
 
 
+def _stats() -> dict:
+    """Report live index totals for the chat sidebar's ``stats`` op.
+
+    Counts are read from the served index itself rather than baked into the UI,
+    so they cannot drift from whatever ``make build-index`` last produced.
+
+    ``entries`` is the number of distinct source files behind the chunk nodes:
+    ``diarykg build`` writes one ``.diarykg/corpus/<date>.md`` per diary entry
+    and every chunk carries its ``file_path``, so distinct paths == diary days.
+
+    :returns: Totals dict, or ``{"error": ...}`` when the index is unreadable.
+    """
+    if not _PEPYS_SQLITE.exists():
+        return {"error": "index not found"}
+    try:
+        with sqlite3.connect(f"file:{_PEPYS_SQLITE}?mode=ro", uri=True) as con:
+            chunks, entries = con.execute(
+                "SELECT COUNT(*), COUNT(DISTINCT file_path) FROM nodes WHERE kind = 'chunk'"
+            ).fetchone()
+            nodes = con.execute("SELECT COUNT(*) FROM nodes").fetchone()[0]
+            edges = con.execute("SELECT COUNT(*) FROM edges").fetchone()[0]
+    except sqlite3.Error as exc:
+        return {"error": str(exc)}
+
+    return {
+        "entries": entries,
+        "chunks": chunks,
+        "nodes": nodes,
+        "edges": edges,
+        "vectors": _PEPYS_STORE.count() if _PEPYS_STORE is not None else 0,
+        "embed_model": EMBED_MODEL,
+    }
+
+
 def _semantic_search(
     query: str,
     k: int,
@@ -305,6 +341,10 @@ def handler(job: dict) -> dict:
     if aux_result is not None:
         return aux_result
 
+    # Corpus-specific op; handle_aux_ops only knows models/rewrite/imagine.
+    if inp.get("op") == "stats":
+        return _stats()
+
     query = inp.get("query", "").strip()
     corpus = inp.get("corpus", "all")
     k = max(1, int(inp.get("k", 8)))
@@ -329,15 +369,28 @@ def handler(job: dict) -> dict:
     print(f"[query] {len(hits)} matching results found in {search_ms:.0f}ms")
 
     synthesis = None
+    synthesis_error: str | None = None
     synthesis_ms: float | None = None
     active_synth = _synth_for_backend(inp.get("backend", ""))
     if synthesize:
         t0_synth = time.perf_counter()
-        synthesis = active_synth.synthesize_rag(
-            query, hits, model=model, max_k=SYNTH_MAX_K, system=_PEPYS_RAG_SYSTEM
-        )
+        # Synthesis is the optional half of the response: the search already
+        # succeeded, and an unreachable LLM server, an unloaded model or a
+        # timeout should not throw those hits away. The failure is reported as
+        # `synthesis_error` alongside the results, which is what chat.py's
+        # "Answer generation failed" branch has always rendered — that branch
+        # was unreachable until now because nothing ever set the key.
+        # gutenberg_kg's handler does the same.
+        try:
+            synthesis = active_synth.synthesize_rag(
+                query, hits, model=model, max_k=SYNTH_MAX_K, system=_PEPYS_RAG_SYSTEM
+            )
+        except Exception as exc:  # noqa: BLE001 — any backend failure degrades the same way
+            synthesis_error = f"{type(exc).__name__}: {exc}"
+            print(f"[query] synthesis FAILED: {synthesis_error}")
         synthesis_ms = (time.perf_counter() - t0_synth) * 1000
-        print(f"[query] synthesis returned in {synthesis_ms:.0f}ms")
+        if synthesis_error is None:
+            print(f"[query] synthesis returned in {synthesis_ms:.0f}ms")
 
     return {
         "query": query,
@@ -347,6 +400,7 @@ def handler(job: dict) -> dict:
         "hits": hits,
         "search_ms": round(search_ms),
         "synthesis": synthesis,
+        "synthesis_error": synthesis_error,
         "synthesis_ms": round(synthesis_ms) if synthesis_ms is not None else None,
         "model": (model or active_synth._cfg.resolved_model()) if synthesize else None,
     }

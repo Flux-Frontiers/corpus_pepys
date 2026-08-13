@@ -59,6 +59,12 @@ RUN pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu 
 # pillow: chat.py lazily imports PIL to save generated images.
 # streamlit + httpx: chat UI. watchdog: native-event file watching.
 #
+# streamlit is version-bounded for the same reason it is in pyproject.toml:
+# chat.py calls st.image(..., use_container_width=True), which only exists from
+# 1.41, and streamlit ships breaking majors. Left unbounded, this layer floated
+# to whatever was newest at build time — so the image could disagree with the
+# floor the repo declares, in either direction.
+#
 # KEEP THESE >= THE FLOORS IN pyproject.toml [project.optional-dependencies].
 # They also move as a SET — diary-kg 0.96.0 requires doc-kg>=0.20.0 and
 # kgmodule-utils>=0.9.0, and these are `==` pins, so a stale one is a hard
@@ -73,7 +79,11 @@ RUN pip install --no-cache-dir \
     "kgmodule-utils[synthesis,sqlite-vec]==${KGMODULE_UTILS_VERSION}" \
     "doc-kg==${DOC_KG_VERSION}" \
     "diary-kg==${DIARY_KG_VERSION}" \
-    streamlit httpx watchdog openai pillow
+    "streamlit>=1.59,<2" \
+    "httpx>=0.27.0" \
+    "watchdog>=6.0.0" \
+    "openai>=1.95.0" \
+    "pillow>=11.0.0"
 
 # Pre-download the embedding model during build so the container never needs
 # to reach HuggingFace at runtime (network may be unavailable or restricted).
@@ -96,11 +106,21 @@ ENV TRANSFORMERS_OFFLINE=1
 COPY .diarykg/ /workspace/pepys/.diarykg/
 
 # Pepys-specific handler (replaces the upstream gutenberg/metabo handler)
+#
+# image_gen.py is deliberately NOT copied. It is the LOCAL mflux/MLX generation
+# path, imported only by docker/image_server.py, which runs on the host in the
+# isolated .venv-image (`make image-server`) because mflux needs native Apple
+# MLX, not a Linux VM. Nothing in this image imports it, and mflux is not
+# installed here — so the module could only ever ImportError. In-container image
+# generation goes out over HTTP to IMAGE_ENDPOINT via kg_utils.synthesis.
 COPY docker/handler.py   /app/handler.py
 COPY docker/chat.py      /app/chat.py
-COPY docker/image_gen.py /app/image_gen.py
 
 ENV PEPYS_KG_ROOT=/workspace/pepys
 ENV EMBED_MODEL=BAAI/bge-small-en-v1.5
+# In-container marker for runtimes that don't create /.dockerenv (Apple's
+# `container` CLI) — read by chat.py to pick host.docker.internal over
+# localhost. Same mechanism as gutenberg_kg's GUTENKG_IN_CONTAINER.
+ENV PEPYS_IN_CONTAINER=1
 
 CMD ["python", "-u", "handler.py"]

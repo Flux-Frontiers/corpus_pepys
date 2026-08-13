@@ -11,26 +11,36 @@
 #     -H "Content-Type: application/json" \
 #     -d '{"input":{"query":"Great Fire of London","corpus":"diary","k":5}}' | jq .
 
+name: corpuspepys
+
 services:
   pepys-worker:
     image: corpus-pepys:latest
     build:
       context: ..
       dockerfile: docker/Dockerfile
-      args:
-        KGMODULE_UTILS_VERSION: 0.10.0
-    command: python handler.py --rp_serve_api --rp_api_host 0.0.0.0
+      # No `args:` on purpose. The KG package pins live in ONE place — the ARG
+      # defaults in docker/Dockerfile — so a compose-triggered build and
+      # `make build-image` (plain `docker build`, no args) produce the same
+      # image. A second copy here is how gutenberg_kg drifted to
+      # kgmodule-utils 0.4.6 while its Dockerfile said 0.5.0; the copy that used
+      # to sit here (KGMODULE_UTILS_VERSION: 0.10.0) was the same trap, one
+      # `poetry update` away from springing. scripts/check_pins.py still checks
+      # compose for stray *_VERSION args, so re-adding one is caught.
+    # -u so the worker's startup/query prints reach `docker compose logs`
+    # unbuffered — matches the Dockerfile CMD and the Apple `container` path.
+    command: python -u handler.py --rp_serve_api --rp_api_host 0.0.0.0
     ports:
       - "8000:8000"
     environment:
       PEPYS_KG_ROOT: /workspace/pepys
       EMBED_MODEL: BAAI/bge-small-en-v1.5
       HANDLER_SECRET: ${HANDLER_SECRET:-}
-      # runpod defaults to DEBUG, which echoes the entire handler response into
-      # the logs — and its logger caps a message at 4096 chars, cutting the
-      # middle out with "...TRUNCATED N CHARACTERS...". That reads like results
-      # went missing when the HTTP response is in fact complete. Set to DEBUG
-      # to get it back.
+      # Pinned to INFO. runpod's own default is DEBUG, which echoes the entire
+      # handler response into the logs — and its logger caps a message at 4096
+      # chars, cutting the middle out with "...TRUNCATED N CHARACTERS...". That
+      # reads like results went missing when the HTTP response is in fact
+      # complete. Set RUNPOD_LOG_LEVEL=DEBUG in docker/.env to get the echo back.
       RUNPOD_LOG_LEVEL: ${RUNPOD_LOG_LEVEL:-INFO}
       # Synthesis via a host LLM server (optional — omit to disable).
       # Defaults target oMLX on :8080; see docker/.env.example.
@@ -57,7 +67,14 @@ services:
       - "8501:8501"
     environment:
       KGRAG_ENDPOINT: http://pepys-worker:8000
+      # Must match the worker's. chat.py reads HANDLER_SECRET and puts it in
+      # every request body; the worker rejects a mismatch with
+      # {"error": "unauthorized"}. Without this line a HANDLER_SECRET set for
+      # the worker made the chat UI fail every query while curl still worked.
+      HANDLER_SECRET: ${HANDLER_SECRET:-}
       # mflux-server runs on the host Mac; host.docker.internal bridges to it.
+      # Read by the worker, not by chat.py — image generation is routed through
+      # the worker's "imagine" op — but kept in step with it so the two agree.
       IMAGE_ENDPOINT: ${IMAGE_ENDPOINT:-http://host.docker.internal:8090}
       IMAGE_STEPS: ${IMAGE_STEPS:-4}
     extra_hosts:

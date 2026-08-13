@@ -114,11 +114,25 @@ data/pepys_enriched_full.txt   (7,282 enriched chunks)
 | Total entries | 3,355 |
 | Enriched chunks | 7,282 |
 | Time span | 1660-01-01 → 1669-08-02 |
-| Embedding shape | 7,282 × 768 (all-mpnet-base-v2) |
+| Embedding shape | 7,282 × 384 (BAAI/bge-small-en-v1.5) |
 | NLP pipeline runtime | ~4 min (Mac Mini, 4 workers) |
 | Embedding runtime | ~33 s (4 workers, batch 32) |
 | KG nodes | 41,738 |
 | KG edges | 564,311 |
+
+The node/edge counts above are from a full build with `SIMILAR_TO` edges. `make
+reindex` runs `diarykg reindex`, which disables them (see the Makefile), giving
+the ~334K edge count quoted in the README. For the live figures of whatever
+index is actually being served, ask the worker rather than either table:
+
+```bash
+curl -s -X POST http://localhost:8000/runsync \
+  -H "Content-Type: application/json" \
+  -d '{"input":{"op":"stats"}}' | python3 -m json.tool
+```
+
+The chat UI's sidebar reads the same `stats` op, so its counts always describe
+the running index.
 
 ---
 

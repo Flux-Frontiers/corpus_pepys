@@ -7,13 +7,115 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+Consistency audit against `gutenberg_kg` — Docker build, chat UI, and dependency
+pins. The two repos serve the same stack from the same worker contract, so
+everywhere they disagreed was either a bug here or a trap waiting to become one.
+
 ### Added
+- **`.dockerignore` (new).** The build context is the repo root for both entry
+  points (`make build-image` builds `.`, compose declares `context: ..`), and
+  the image is built by `COPY .diarykg/` — so whatever `diarykg build` left in
+  that directory was baked in wholesale. `gutenberg_kg` has carried this file
+  for exactly this reason; here there was none. It now excludes the build-only
+  artefacts that must never ship: `.diarykg/corpus/` (DiaryKG's copy of the
+  source Markdown, needed by `make reindex`, never read at serve time),
+  `.diarykg/snapshots/`, embedding caches, SQLite WAL/SHM sidecars, and any
+  `lancedb/` directory left over from a pre-sqlite-vec build — the last of which
+  is a multi-GB payload the handler cannot even open. Also drops `data/`
+  (13 MB of source text), `.git/`, and the test/doc/asset trees from the context.
+- **`stats` op on the worker**, returning `entries`, `chunks`, `nodes`, `edges`,
+  `vectors` and `embed_model` read live from the served index. `gutenberg_kg`'s
+  worker has had one; this one did not, which is why the figure below was
+  hardcoded. Honours `HANDLER_SECRET` like every other op, and reports
+  `{"error": ...}` rather than raising on a missing or corrupt index.
+- **`make stop`.** Advertised in `make help` and declared in `.PHONY`, but the
+  target itself did not exist — `make stop` failed with "No rule to make
+  target". Added for both runtimes; it halts the containers while `make down`
+  continues to delete them.
+- **`tests/test_chat.py` (23 tests)** covering the model blocklist and the
+  `stats` fetch, plus **8 tests** for the handler's `stats` op. `tests/conftest.py`
+  gained a streamlit stub whose `cache_data` is an identity decorator, so the
+  memoised chat helpers are testable at all. Suite: 57 → 88 tests.
 
 ### Changed
+- **The chat UI now filters the synthesis model list**, using the same
+  `_MODEL_BLOCKLIST` as `gutenberg_kg`: reasoning models (Agents-A1, DeepSeek-R1,
+  gpt-oss) whose chain-of-thought lands in the answer pane as prose, plus
+  non-chat utilities (markitdown, embedding models). Both UIs read the same
+  oMLX/Ollama catalogue, so a model unusable there was equally unusable here —
+  but only `gutenberg_kg` was hiding them. A blocklisted model reported as the
+  backend's *default* is also replaced, which is the case that used to select
+  itself with no interaction at all.
+- **Sidebar corpus counts come from the worker's `stats` op** instead of the
+  string `"3,355 entries · 7,282 indexed chunks"` written into `chat.py`. That
+  pair already disagreed with `README.md`'s own table (7,285) and would have gone
+  stale on the next `make build-index`. Falls back to "corpus stats unavailable"
+  when the worker is offline.
+- **Container detection matches `gutenberg_kg`.** `chat.py` tested only for
+  `/.dockerenv`, which Apple's `container` runtime does not create; the image now
+  sets `PEPYS_IN_CONTAINER=1` and `chat.py` honours it, mirroring
+  `GUTENKG_IN_CONTAINER`.
+- **Version floors.** `streamlit>=1.35.0` → `>=1.59,<2`: `chat.py` calls
+  `st.image(..., use_container_width=True)`, and that keyword did not exist on
+  `st.image` before 1.41 — 1.35 has only the deprecated `use_column_width`, so
+  any environment honouring the declared floor lost "Render response" to a
+  `TypeError`. The upper bound matches `gutenberg_kg`. `watchdog>=6.0.0` added
+  (declared by `gutenberg_kg`'s `[chat]` extra, missing here, so a host-side
+  `make chat` fell back to polling). `pytest` floor raised to `>=9.0.3` to match
+  the fleet. The Dockerfile's `streamlit httpx watchdog openai pillow` line is
+  now version-bounded rather than floating to whatever was newest at build time.
+- **CI lints what `make lint` lints.** `ruff check` / `ruff format --check` now
+  cover `scripts/` and `tests/`, not `docker/` alone — a lint error outside
+  `docker/` used to pass CI and fail locally.
+- **`docker-compose.yml` gained a project `name:`** (`corpuspepys`) and `-u` on
+  the worker command, matching the Dockerfile `CMD` and the Apple path so
+  startup and query logs are not buffered away from `docker compose logs`.
 
 ### Removed
+- **The `args:` block in `docker-compose.yml`.** It carried a second copy of
+  `KGMODULE_UTILS_VERSION`, overriding the Dockerfile default at build time, so
+  a compose build and `make build-image` could produce different images from the
+  same tree. `gutenberg_kg` removed its copy after exactly that drift
+  (kgmodule-utils 0.4.6 vs 0.5.0); the pins now live only in the Dockerfile ARGs.
+  `scripts/check_pins.py` still watches compose for stray `*_VERSION` args.
+- **`COPY docker/image_gen.py` from the Dockerfile.** `image_gen` is the local
+  mflux/MLX path, imported only by `image_server.py`, which runs on the *host* in
+  `.venv-image` because mflux needs native Apple MLX. Nothing in the image
+  imports it and mflux is not installed there, so it could only ever have raised
+  `ImportError`.
+- **`[tool.poetry.group.dev.dependencies]`.** The same six dev tools were
+  declared both there and in the PEP 621 `dev` extra — two floors to maintain,
+  already drifting from the fleet. Now declared once, in the extra, as
+  `gutenberg_kg` does. `commit.txt`, a gitignored scratch file, is no longer
+  tracked.
 
 ### Fixed
+- **The chat UI could not authenticate when `HANDLER_SECRET` was set.**
+  `chat.py` reads `HANDLER_SECRET` and includes it in every request, but neither
+  the compose `pepys-chat` service nor the Apple `chat-container` target passed
+  it in — so with a secret configured, the worker answered every chat query with
+  `{"error": "unauthorized"}` while `curl` and `make query` kept working. Both
+  paths now forward it. (`gutenberg_kg` has the same gap in its chat service.)
+- **A failed synthesis threw away a search that had already succeeded.**
+  `handler.py` called `synthesize_rag` unguarded, so an unreachable LLM server,
+  an unloaded model or a timeout propagated out of the handler and failed the
+  whole query — discarding hits that had already been retrieved. It now catches
+  the failure and returns it as `synthesis_error` alongside the results, which
+  is what `chat.py`'s "Answer generation failed" branch has always rendered:
+  that branch was unreachable because nothing ever set the key. `gutenberg_kg`
+  carried the identical dead path and has been fixed the same way.
+- **`docs/API.md` documented a corpus scope the worker rejects.** It advertised
+  `"corpus": "pepys"` in the schema, the field table, the sample response and the
+  curl example; the handler accepts only `diary` and `all`, so every documented
+  call failed with `unknown corpus 'pepys'`.
+- **Stale and self-contradictory corpus figures.** `README.md` gave the enriched
+  chunk count as both 7,282 and 7,285; `docs/BUILDING.md` described the embedding
+  shape as `7,282 × 768 (all-mpnet-base-v2)` when the build stack has defaulted
+  to `BAAI/bge-small-en-v1.5` (384-dim) since the sqlite-vec migration. The
+  README also listed an `analysis/` directory that does not exist in this repo.
+  Where the node/edge counts legitimately differ between a full build and a
+  `make reindex` (which disables `SIMILAR_TO`), the docs now say so and point at
+  the `stats` op for the live numbers.
 
 ---
 

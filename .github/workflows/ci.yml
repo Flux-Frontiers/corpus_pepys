@@ -29,20 +29,25 @@ jobs:
       - name: Install lint tools
         run: pip install "ruff>=0.4.0" "ty>=0.0.41"
 
+      # Scope matches `make lint` plus tests/. CI previously checked docker/
+      # only, so a lint error in scripts/ or tests/ passed CI and then failed
+      # on the contributor's machine at `make lint` / pre-commit.
       - name: ruff — check
-        run: ruff check docker/
+        run: ruff check docker/ scripts/ tests/
 
       - name: ruff — format
-        run: ruff format --check docker/
+        run: ruff format --check docker/ scripts/ tests/
 
       - name: ty
         run: ty check docker/
 
   # ---------------------------------------------------------------------------
   # Tests
-  # pytest is the only install: tests/conftest.py stubs runpod, kg_rag and
-  # kg_utils into sys.modules at collection time, so the suite never imports
-  # the real KGRAG stack (and never pulls torch into CI).
+  # Only pytest and httpx are installed: tests/conftest.py stubs runpod, kg_rag,
+  # kg_utils and streamlit into sys.modules at collection time, so the suite
+  # never imports the real KGRAG stack (and never pulls torch into CI).
+  # httpx is real rather than stubbed — it is small and pure-Python, and
+  # tests/test_chat.py asserts on its exception types, which a mock cannot model.
   # ---------------------------------------------------------------------------
   test:
     name: Test
@@ -55,8 +60,8 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install pytest
-        run: pip install "pytest>=8.0.0"
+      - name: Install test deps
+        run: pip install "pytest>=9.0.3" "httpx>=0.27.0"
 
       - name: Run tests
         run: pytest

@@ -69,3 +69,22 @@ _stub("kg_utils.worker", handle_aux_ops=MagicMock(return_value=None))
 # sqlite-vec vector backend; the handler only opens it when vectors.sqlite
 # exists on disk — it doesn't in tests, so the stub is never instantiated.
 _stub("kg_utils.vector_backend", SqliteVecBackend=MagicMock())
+
+_stub(
+    "kg_utils.worker.client",
+    WorkerClient=MagicMock(),
+    WorkerError=type("WorkerError", (Exception,), {}),
+)
+sys.modules["kg_utils.worker"].WorkerClient = sys.modules["kg_utils.worker.client"].WorkerClient
+sys.modules["kg_utils.worker"].WorkerError = sys.modules["kg_utils.worker.client"].WorkerError
+
+
+# ── streamlit ─────────────────────────────────────────────────────────────────
+# chat.py builds its whole page at import time (set_page_config, markdown, ...),
+# so a plain MagicMock module is enough — except for @st.cache_data, which is a
+# decorator *factory*. Left as a MagicMock it would replace every decorated
+# function with a MagicMock, so the memoised helpers could not be tested at all.
+# Swapped for an identity decorator, which also removes cross-test cache bleed.
+_streamlit = MagicMock()
+_streamlit.cache_data = lambda *a, **kw: lambda fn: fn
+sys.modules["streamlit"] = _streamlit
