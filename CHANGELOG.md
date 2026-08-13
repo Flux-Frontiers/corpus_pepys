@@ -12,9 +12,57 @@ chat UI, and dependency pins; the two repos serve the same stack from the same
 worker contract, so everywhere they disagreed was either a bug here or a trap
 waiting to become one. Then a runtime pass: Docker is the default and the only
 option most people have, but `make up` broke on any non-Apple host and the docs
-had drifted into presenting the Apple-Silicon setup as the normal one.
+had drifted into presenting the Apple-Silicon setup as the normal one. Then a
+third: porting `gutenberg_kg`'s SDXL-Lightning image server, so image generation
+works on those hosts instead of merely being skipped.
 
 ### Added
+
+- **`docker/sdxl_server.py` (new)** — an SDXL-Lightning image server on `:8091`,
+  ported from `gutenberg_kg`, exposing the identical OpenAI-style
+  `/v1/images/generations` contract as the mflux one, so the worker only needs
+  `IMAGE_ENDPOINT` repointed. It resolves `cuda → mps → cpu`, so unlike FLUX it
+  runs on any host — fast on a GPU, usable on Apple Silicon, slow but working on
+  plain CPU. `make up` selects it wherever mflux cannot run, which means image
+  generation now *works* off Apple Silicon rather than being skipped.
+
+  Two deliberate divergences from `gutenberg_kg`'s copy, both worth porting
+  back. **torch is imported lazily**, behind `_torch()`, so the module can be
+  imported for tests or docs from an environment without the diffusers stack —
+  the same deferral `image_gen.py` already uses for mflux; the upstream copy
+  imports torch at module scope and so cannot be imported outside `.venv-sdxl`.
+  And **weights are fetched on first run** rather than requiring an existing
+  cache: upstream hard-wires `local_files_only=True`, which fails on a fresh
+  machine. `SDXL_OFFLINE=1` restores the strict behaviour once cached.
+- **`make sdxl-server`** and **`make sdxl-fetch`** — the latter pre-downloads the
+  ~7 GB of weights so the first `make up` is not a silent long wait. `.venv-sdxl`
+  is separate from `.venv-image` because mflux and diffusers pin conflicting
+  `transformers` ranges and cannot share a venv.
+- **`IMAGE_BACKEND`** selects the image server: `flux` where mflux can run,
+  `sdxl` everywhere else, overridable with `make up IMAGE_BACKEND=flux|sdxl`.
+  Forcing `flux` on an unsupported host fails with a message naming the
+  requirement and pointing at the SDXL alternative. Apple Silicon is unchanged.
+- **`tests/test_sdxl_server.py` (42 tests)** covering size parsing, step
+  resolution (a Lightning UNet's distilled count wins over a per-request
+  override), the offline flag, and the `cuda → mps → cpu` fallback. They need no
+  stubbing at all, which is the deferred-import design paying for itself.
+- **`docs/DOCKER.md` (new)** — the Docker counterpart to
+  `docs/APPLE_CONTAINERS.md`, which had no equivalent. Covers the pulled image
+  and the from-clone path, building, generated answers via Ollama, the everyday
+  targets and their raw `docker compose` equivalents, image generation, and
+  troubleshooting. Docker is the default runtime and works on Linux, macOS and
+  Windows; the docs had drifted into presenting the Apple-Silicon setup as the
+  normal one.
+- **`make build`**, the canonical build target in both runtime branches, matching
+  `gutenberg_kg`. `make build-image` stays as an alias — the README, the docs and
+  the changelog all reference it.
+- **`make build-all`** — builds under every container runtime installed on the
+  machine. Docker and Apple's `container` keep *separate image stores*, so on a
+  Mac with both, an image built by one is invisible to the other and
+  `make run RUNTIME=apple` after a Docker build silently has nothing to run. It
+  skips a runtime that is absent rather than failing.
+- **`make help` now reports what it detected** — which runtimes are installed,
+  the current one, and which image backend it selected.
 - **`.dockerignore` (new).** The build context is the repo root for both entry
   points (`make build-image` builds `.`, compose declares `context: ..`), and
   the image is built by `COPY .diarykg/` — so whatever `diarykg build` left in
