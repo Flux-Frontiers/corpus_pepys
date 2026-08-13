@@ -5,8 +5,8 @@ Silicon and specifically want Apple's native `container` CLI (see
 [APPLE_CONTAINERS.md](APPLE_CONTAINERS.md)). Everything here works on Linux,
 macOS (Intel or Apple Silicon) and Windows.
 
-Nothing on this page needs Apple hardware. Where a feature does, it is called
-out — there is exactly one, and it is optional.
+Nothing on this page needs Apple hardware. Even image generation has a portable
+backend — see [Image generation](#image-generation).
 
 ---
 
@@ -118,28 +118,42 @@ oMLX and OpenAI alternatives.
 
 ---
 
-## What needs Apple Silicon
+## Image generation
 
-One thing: the **local FLUX image server** behind the chat UI's *Render
-response* button. `make image-server` builds an isolated `.venv-image` from
-`docker/requirements-image.txt`, which installs [mflux] — and mflux needs Apple
-MLX on macOS arm64, or `mlx[cuda13]` and an NVIDIA GPU on Linux. It ships no
-Windows wheel.
+The chat UI's *Render response* button needs a local image server. There are
+two, and `make up` starts whichever this host can run:
 
-`make up` detects this and skips the image server with a note rather than
-failing, so the worker and chat UI come up normally. Everything except that one
-button is unaffected: search, synthesis, the API, and the whole chat flow.
+| Backend | Port | Start with | Runs on |
+|---|---|---|---|
+| FLUX.2 ([mflux]) | `8090` | `make image-server` | Apple Silicon, or Linux with CUDA 13 — mflux pins `mlx`, and ships no Windows wheel |
+| SDXL-Lightning (diffusers) | `8091` | `make sdxl-server` | **anywhere** — resolves `cuda → mps → cpu`, so it works on a plain CPU box too, just slowly |
 
-If you are on a CUDA 13 Linux box, mflux does support you — the detection just
-does not know it. Force it:
+So on a non-Apple host you still get image generation: `make up` selects SDXL
+automatically. Force either with `make up IMAGE_BACKEND=flux|sdxl`; asking for
+FLUX where it cannot run fails with a message naming the requirement rather than
+a pip resolution error, and `FORCE_IMAGE_SERVER=1` overrides that check for the
+CUDA 13 Linux case the probe cannot detect.
+
+Each backend gets its own venv — `.venv-sdxl` and `.venv-image` — because mflux
+and diffusers pin conflicting `transformers` ranges and so cannot share one.
+
+**First run downloads weights.** SDXL base + the fp16-fix VAE + the Lightning
+UNet come to roughly 7 GB, cached under `~/.cache/huggingface`. To get that out
+of the way before starting the stack:
 
 ```bash
-make image-server FORCE_IMAGE_SERVER=1
+make sdxl-fetch
 ```
 
-You can also point the worker at any OpenAI-compatible image endpoint via
-`IMAGE_ENDPOINT`, or select the *OpenAI* provider in the chat sidebar to
-generate images through DALL·E instead.
+Once cached, `SDXL_OFFLINE=1` makes the server refuse network access entirely.
+
+Starting the image server is best-effort: if it fails, the worker and chat UI
+stay up and only that one button is affected. Search, synthesis, the API and the
+rest of the chat flow never touch it.
+
+You can also skip local generation and point `IMAGE_ENDPOINT` at any
+OpenAI-compatible image server, or select the *OpenAI* provider in the chat
+sidebar.
 
 [mflux]: https://github.com/filipstrand/mflux
 
@@ -149,17 +163,18 @@ generate images through DALL·E instead.
 
 ```bash
 make run        # worker only
-make up         # worker + chat UI (+ image server where supported)
+make up         # worker + chat UI + an image server (backend auto-selected)
 make chat       # Streamlit UI on the host, against a running worker
 make stop       # halt the containers, keep them
 make down       # stop and remove the containers
 make logs       # follow worker logs
 make clean      # remove the index and the image
 make query      # smoke-test curl  (QUERY="..." to override)
+make sdxl-fetch # pre-download the SDXL weights (~7 GB)
 ```
 
 `make help` prints the same list plus what it detected on your machine — which
-runtimes are installed, and whether the image server can run here.
+runtimes are installed, and which image backend it selected.
 
 Prefer raw compose? The Make targets are thin wrappers:
 

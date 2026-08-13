@@ -24,8 +24,8 @@ should be deliberate and commented, not incidental. See "Fleet consistency" belo
 | KGRAG worker (`make run`) | RunPod serverless API on `http://localhost:8000` |
 | Streamlit chat (`make chat` / `--profile chat`) | Pepys-specific UI on `:8501` |
 | Synthesis | oMLX / Ollama / OpenAI, selectable per request; off unless an endpoint is configured |
-| Image generation | Host-side FLUX via `make image-server` (Apple MLX or CUDA 13 only); routed through the worker's `imagine` op. `make up` skips it elsewhere |
-| Tests | 91, no KGRAG environment required (`tests/conftest.py` stubs the stack) |
+| Image generation | Two host-side servers: FLUX (`make image-server`, :8090, Apple MLX / CUDA 13) and SDXL-Lightning (`make sdxl-server`, :8091, runs anywhere). `make up` picks one; routed through the worker's `imagine` op |
+| Tests | 133, no KGRAG environment required (`tests/conftest.py` stubs the stack) |
 
 ---
 
@@ -50,7 +50,9 @@ corpus_pepys/
 │   ├── chat.py                    # Pepys-specific Streamlit UI
 │   ├── image_gen.py               # Local mflux/MLX generation — HOST ONLY, not in the image
 │   ├── image_server.py            # FastAPI wrapper around image_gen, runs in .venv-image
+│   ├── sdxl_server.py             # Portable diffusers image server, runs in .venv-sdxl
 │   ├── requirements-image.txt     # Deps for .venv-image (mflux conflicts with the KG stack)
+│   ├── requirements-sdxl.txt      # Deps for .venv-sdxl (diffusers conflicts with both)
 │   └── .env.example               # HANDLER_SECRET, synthesis and image endpoints
 ├── tests/                         # conftest.py stubs runpod/kg_rag/kg_utils/streamlit
 ├── docs/                          # User guide, API reference, build instructions
@@ -76,6 +78,7 @@ make build          # build the image — bakes .diarykg/ into corpus-pepys:late
 make build-all      # build under every runtime installed (docker + apple)
 make run            # worker on localhost:8000
 make up             # worker + chat (+ host image server where supported)
+make sdxl-fetch     # pre-download the SDXL weights (~7 GB) before first use
 make chat           # streamlit run docker/chat.py (worker must already be up)
 make query          # smoke-test curl (set QUERY="..." to override)
 make stop           # halt containers, keep them

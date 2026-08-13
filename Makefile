@@ -1,4 +1,4 @@
-.PHONY: help setup install install-dev install-model check-pins build-corpus build-index reindex build build-image build-all run stop down logs image-server image-server-optional chat chat-container up query serve-llm test lint clean
+.PHONY: help setup install install-dev install-model check-pins build-corpus build-index reindex build build-image build-all run stop down logs image-server sdxl-server sdxl-fetch image-server-optional chat chat-container up query serve-llm test lint clean
 
 # Bare `make` prints help rather than installing: a cold `make install` pulls
 # torch + the spaCy stack, which is not what a stray keystroke should trigger.
@@ -11,6 +11,7 @@ QUERY         ?= Great Fire of London
 OMLX_PORT     ?= 8080
 COMPOSE       = docker compose -f docker/docker-compose.yml
 IMAGE_SERVER  = http://localhost:8090
+SDXL_SERVER   = http://localhost:8091
 
 # ------------------------------------------------------------------
 # Container runtime — RUNTIME=docker (default) or RUNTIME=apple.
@@ -49,16 +50,39 @@ HAVE_APPLE  := $(shell command -v container >/dev/null 2>&1 && echo 1)
 # after the worker and chat had already started, so the stack looked broken
 # when only the optional image backend was unavailable.
 #
-# Image generation is optional everywhere: the chat UI's "Render response"
-# button is the only thing that uses it, and the worker reaches it over HTTP,
-# so `make up` continues without it. Set FORCE_IMAGE_SERVER=1 to try anyway —
-# that is the escape hatch for a CUDA 13 Linux box, which is supported by mflux
-# but not detected here.
+# Set FORCE_IMAGE_SERVER=1 to assert support anyway — the escape hatch for a
+# CUDA 13 Linux box, which mflux does support but this probe cannot detect.
 # ------------------------------------------------------------------
-IMAGE_SERVER_OK := $(shell \
+MFLUX_OK := $(shell \
   if [ "$(FORCE_IMAGE_SERVER)" = "1" ]; then echo 1; \
   elif [ "$$(uname -s 2>/dev/null)" = "Darwin" ] && [ "$$(uname -m 2>/dev/null)" = "arm64" ]; then echo 1; \
   fi)
+
+# ------------------------------------------------------------------
+# Image backend for `make up`: flux (FLUX.2 / mflux) or sdxl (SDXL-Lightning).
+#
+# The default is conditional, so image generation works on every platform
+# rather than only Apple Silicon:
+#   flux  — docker/image_server.py, :8090, mflux. Fastest, but see above.
+#   sdxl  — docker/sdxl_server.py,  :8091, diffusers. Resolves cuda -> mps ->
+#           cpu, so it runs anywhere; slow on plain CPU but it works.
+#
+#   make up                     → flux where mflux runs, sdxl everywhere else
+#   make up IMAGE_BACKEND=sdxl  → force SDXL-Lightning (worker repointed)
+#   make up IMAGE_BACKEND=flux  → force FLUX.2; errors if mflux cannot run here
+#
+# On Apple Silicon nothing changes: flux stays the default.
+# ------------------------------------------------------------------
+IMAGE_BACKEND ?= $(if $(MFLUX_OK),flux,sdxl)
+ifeq ($(IMAGE_BACKEND),sdxl)
+IMAGE_TARGET   = sdxl-server
+IMAGE_URL      = $(SDXL_SERVER)
+IMG_ENDPOINT   = http://host.docker.internal:8091
+else
+IMAGE_TARGET   = image-server
+IMAGE_URL      = $(IMAGE_SERVER)
+IMG_ENDPOINT   = http://host.docker.internal:8090
+endif
 
 # Apple `container` settings (RUNTIME=apple only). Each container is its own
 # VM — memory is an explicit upper bound, not shared with the host like Docker
@@ -127,7 +151,7 @@ help:
 	@echo "  native 'container' CLI (e.g. make up RUNTIME=apple)."
 	@echo "  Current runtime: $(RUNTIME)"
 	@echo "  Detected:  docker=$(if $(HAVE_DOCKER),yes,no)  container=$(if $(HAVE_APPLE),yes,no)"
-	@echo "  Local image server supported here: $(if $(IMAGE_SERVER_OK),yes,no)"
+	@echo "  Image backend: $(IMAGE_BACKEND) ($(IMAGE_URL))   [flux needs mflux: $(if $(MFLUX_OK),yes,no)]"
 	@echo ""
 	@echo "  Synthesis is optional. Ollama works everywhere; oMLX is the faster"
 	@echo "  Apple-Silicon option. See docs/API.md."
@@ -222,12 +246,13 @@ reindex:
 # can reach it over the vmnet — 127.0.0.1 would be invisible from there.
 # ------------------------------------------------------------------
 image-server:
-	@if [ "$(IMAGE_SERVER_OK)" != "1" ]; then \
-		echo "ERROR: this host cannot run the local FLUX image server."; \
+	@if [ "$(MFLUX_OK)" != "1" ]; then \
+		echo "ERROR: the FLUX image server cannot run on this host."; \
 		echo "  mflux needs Apple MLX (macOS arm64), or mlx[cuda13] on a Linux box"; \
 		echo "  with an NVIDIA GPU. It ships no Windows wheel."; \
-		echo "  Image generation is optional — everything else works without it."; \
-		echo "  Re-run with FORCE_IMAGE_SERVER=1 to try anyway (CUDA 13 Linux)."; \
+		echo "  Use the portable backend instead:  make up IMAGE_BACKEND=sdxl"; \
+		echo "  (SDXL-Lightning resolves cuda -> mps -> cpu, so it runs anywhere.)"; \
+		echo "  Or re-run with FORCE_IMAGE_SERVER=1 on a CUDA 13 Linux host."; \
 		exit 1; \
 	fi
 	@if [ ! -x .venv-image/bin/python ]; then \
@@ -238,6 +263,36 @@ image-server:
 	@.venv-image/bin/python -m pip install --quiet -r docker/requirements-image.txt
 	@echo "Starting FLUX image server on $(IMAGE_SERVER) (background, .venv-image) ..."
 	MFLUX_SERVER_HOST=0.0.0.0 .venv-image/bin/python docker/image_server.py &
+
+# The portable image backend. Its own venv, separate from .venv-image: mflux and
+# diffusers pin conflicting transformers ranges, so the two cannot share one.
+# Binds 0.0.0.0 so an Apple container VM can reach it over the vmnet.
+#
+# First run downloads ~7 GB of weights from HuggingFace and caches them under
+# ~/.cache/huggingface. `make sdxl-fetch` does that step on its own if you would
+# rather not fold it into a `make up`.
+sdxl-server:
+	@if [ ! -x .venv-sdxl/bin/python ]; then \
+		echo "Creating .venv-sdxl for isolated diffusers dependencies ..."; \
+		python3 -m venv .venv-sdxl; \
+	fi
+	@.venv-sdxl/bin/python -m pip install --quiet --upgrade pip
+	@.venv-sdxl/bin/python -m pip install --quiet -r docker/requirements-sdxl.txt
+	@echo "Starting SDXL-Lightning image server on $(SDXL_SERVER) (background, .venv-sdxl) ..."
+	SDXL_SERVER_HOST=0.0.0.0 .venv-sdxl/bin/python docker/sdxl_server.py &
+
+# Pre-download the SDXL weights without starting the server, so the first
+# `make up` is not a silent multi-GB wait.
+sdxl-fetch:
+	@if [ ! -x .venv-sdxl/bin/python ]; then \
+		echo "Creating .venv-sdxl for isolated diffusers dependencies ..."; \
+		python3 -m venv .venv-sdxl; \
+	fi
+	@.venv-sdxl/bin/python -m pip install --quiet --upgrade pip
+	@.venv-sdxl/bin/python -m pip install --quiet -r docker/requirements-sdxl.txt
+	@echo "Fetching SDXL-Lightning weights (~7 GB, cached under ~/.cache/huggingface) ..."
+	@.venv-sdxl/bin/python -c "import sys; sys.path.insert(0, 'docker'); import sdxl_server; sdxl_server._load_pipeline()"
+	@echo "Done. Weights cached; SDXL_OFFLINE=1 will now work."
 
 # ------------------------------------------------------------------
 # `build-image` is the old name for `build`. Kept as an alias because the
@@ -277,15 +332,9 @@ build-all:
 # optional backend for one button in the chat UI, so a host that cannot run it
 # gets a note, not a failed `up` with the worker and chat already running.
 image-server-optional:
-	@if [ "$(IMAGE_SERVER_OK)" = "1" ]; then \
-		echo "Starting FLUX image server in background ..."; \
-		$(MAKE) --no-print-directory image-server; \
-	else \
-		echo "Skipping the FLUX image server — unsupported on this host."; \
-		echo "  (needs Apple MLX on macOS arm64, or CUDA 13 on Linux.)"; \
-		echo "  Search, chat and synthesis are unaffected; only the chat UI's"; \
-		echo "  'Render response' button is unavailable."; \
-	fi
+	@echo "Starting $(IMAGE_BACKEND) image server in background ..."
+	-@$(MAKE) --no-print-directory $(IMAGE_TARGET) || \
+		echo "WARNING: the image server did not start. Worker and chat are up; only the chat UI's 'Render response' button is affected." 
 
 ifeq ($(RUNTIME),apple)
 
@@ -302,7 +351,7 @@ ifeq ($(RUNTIME),apple)
 APPLE_REWRITE_ENDPOINTS = \
   VLLM_ENDPOINT_URL=$$(printf '%s' "$${VLLM_ENDPOINT_URL:-http://$(APPLE_HOST_GW):$(OMLX_PORT)/v1}" | sed 's/host\.docker\.internal/$(APPLE_HOST_GW)/g'); \
   OLLAMA_ENDPOINT=$$(printf '%s' "$${OLLAMA_ENDPOINT:-http://$(APPLE_HOST_GW):11434/v1}" | sed 's/host\.docker\.internal/$(APPLE_HOST_GW)/g'); \
-  IMAGE_ENDPOINT=$$(printf '%s' "$${IMAGE_ENDPOINT:-http://$(APPLE_HOST_GW):8090}" | sed 's/host\.docker\.internal/$(APPLE_HOST_GW)/g')
+  IMAGE_ENDPOINT=$$(printf '%s' "$${IMAGE_ENDPOINT:-$(IMG_ENDPOINT)}" | sed 's/host\.docker\.internal/$(APPLE_HOST_GW)/g')
 
 # Idempotent host setup: install Apple's `container` CLI if missing (Homebrew,
 # bottled — no sudo; otherwise point at the GitHub releases pkg) and start its
@@ -374,9 +423,11 @@ chat-container: run
 	@echo "Chat UI: http://localhost:8501"
 
 up: chat-container
+	@echo "Image backend: $(IMAGE_BACKEND)"
 	@$(MAKE) --no-print-directory image-server-optional
 	@echo ""
 	@echo "Worker:       http://localhost:8000"
+	@echo "Image server: $(IMAGE_URL)  ($(IMAGE_BACKEND))"
 	@echo "Chat UI:      http://localhost:8501"
 	@echo ""
 	@echo "Run 'make down RUNTIME=apple' to shut down."
@@ -388,10 +439,12 @@ up: chat-container
 stop:
 	-container stop $(CHAT_NAME) $(WORKER_NAME) 2>/dev/null || true
 	-pkill -f image_server.py 2>/dev/null || true
+	-pkill -f sdxl_server.py 2>/dev/null || true
 
 down:
 	-container delete -f $(CHAT_NAME) $(WORKER_NAME) 2>/dev/null || true
 	-pkill -f image_server.py 2>/dev/null || true
+	-pkill -f sdxl_server.py 2>/dev/null || true
 
 logs:
 	container logs -f $(WORKER_NAME)
@@ -421,20 +474,23 @@ run:
 stop:
 	$(COMPOSE) --profile chat stop
 	-pkill -f image_server.py 2>/dev/null || true
+	-pkill -f sdxl_server.py 2>/dev/null || true
 
 down:
 	$(COMPOSE) --profile chat down
 	-pkill -f image_server.py 2>/dev/null || true
+	-pkill -f sdxl_server.py 2>/dev/null || true
 
 logs:
 	$(COMPOSE) logs -f pepys-worker
 
 up:
-	@echo "Starting worker + chat (Docker) ..."
-	$(COMPOSE) --profile chat up -d
+	@echo "Starting worker + chat (Docker), image backend: $(IMAGE_BACKEND) ($(IMG_ENDPOINT)) ..."
+	IMAGE_ENDPOINT=$(IMG_ENDPOINT) $(COMPOSE) --profile chat up -d
 	@$(MAKE) --no-print-directory image-server-optional
 	@echo ""
 	@echo "Worker:       http://localhost:8000"
+	@echo "Image server: $(IMAGE_URL)  ($(IMAGE_BACKEND))"
 	@echo "Chat UI:      http://localhost:8501"
 
 endif
