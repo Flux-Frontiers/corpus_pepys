@@ -1,0 +1,24 @@
+# Isolated deps for the SDXL-Lightning image server (docker/sdxl_server.py).
+#
+# Kept OUT of pyproject.toml and out of .venv-image for two separate reasons:
+#   - the diffusers/torch stack here would collide with the doc-kg/diary-kg
+#     transformers pins in the project env;
+#   - mflux (.venv-image) pins its own transformers range, so the two image
+#     backends cannot share one venv either.
+# `make sdxl-server` builds .venv-sdxl from this file.
+#
+# Portable, unlike requirements-image.txt: torch's default wheels cover CPU,
+# CUDA and Apple MPS, and sdxl_server resolves cuda -> mps -> cpu. This is the
+# image backend for anything that is not Apple Silicon.
+#
+# Mirrors gutenberg_kg/docker/requirements-sdxl.txt.
+fastapi>=0.116.0
+uvicorn>=0.30.0
+pydantic>=2.8.0
+pillow>=11.0.0
+torch>=2.4.0
+diffusers>=0.30.0
+transformers>=4.44.0
+accelerate>=0.33.0
+safetensors>=0.4.0
+huggingface_hub>=0.24.0

@@ -24,8 +24,8 @@ should be deliberate and commented, not incidental. See "Fleet consistency" belo
 | KGRAG worker (`make run`) | RunPod serverless API on `http://localhost:8000` |
 | Streamlit chat (`make chat` / `--profile chat`) | Pepys-specific UI on `:8501` |
 | Synthesis | oMLX / Ollama / OpenAI, selectable per request; off unless an endpoint is configured |
-| Image generation | Host-side FLUX via `make image-server`; routed through the worker's `imagine` op |
-| Tests | 88, no KGRAG environment required (`tests/conftest.py` stubs the stack) |
+| Image generation | Two host-side servers: FLUX (`make image-server`, :8090, Apple MLX / CUDA 13) and SDXL-Lightning (`make sdxl-server`, :8091, runs anywhere). `make up` picks one; routed through the worker's `imagine` op |
+| Tests | 133, no KGRAG environment required (`tests/conftest.py` stubs the stack) |
 
 ---
 
@@ -50,7 +50,9 @@ corpus_pepys/
 │   ├── chat.py                    # Pepys-specific Streamlit UI
 │   ├── image_gen.py               # Local mflux/MLX generation — HOST ONLY, not in the image
 │   ├── image_server.py            # FastAPI wrapper around image_gen, runs in .venv-image
+│   ├── sdxl_server.py             # Portable diffusers image server, runs in .venv-sdxl
 │   ├── requirements-image.txt     # Deps for .venv-image (mflux conflicts with the KG stack)
+│   ├── requirements-sdxl.txt      # Deps for .venv-sdxl (diffusers conflicts with both)
 │   └── .env.example               # HANDLER_SECRET, synthesis and image endpoints
 ├── tests/                         # conftest.py stubs runpod/kg_rag/kg_utils/streamlit
 ├── docs/                          # User guide, API reference, build instructions
@@ -72,9 +74,11 @@ make build-corpus   # re-run DiaryTransformer (only if pepys_enriched_full.txt c
 make build-index    # full diarykg build from pepys_enriched_full.txt (~3 min)
 make reindex        # rebuild SQLite + vectors.sqlite only, skip ingest (~1 min)
 make check-pins     # verify lock/Dockerfile/compose KG pins agree
-make build-image    # docker build — bakes .diarykg/ into corpus-pepys:latest
+make build          # build the image — bakes .diarykg/ into corpus-pepys:latest
+make build-all      # build under every runtime installed (docker + apple)
 make run            # worker on localhost:8000
-make up             # worker + chat + host image server
+make up             # worker + chat (+ host image server where supported)
+make sdxl-fetch     # pre-download the SDXL weights (~7 GB) before first use
 make chat           # streamlit run docker/chat.py (worker must already be up)
 make query          # smoke-test curl (set QUERY="..." to override)
 make stop           # halt containers, keep them
@@ -83,7 +87,10 @@ make clean          # rm -rf .diarykg/ + remove the image
 ```
 
 Every container target accepts `RUNTIME=apple` to drive Apple's native
-`container` CLI instead of Docker. See `docs/APPLE_CONTAINERS.md`.
+`container` CLI instead of Docker (`docs/APPLE_CONTAINERS.md`). Docker is the
+default and works on every platform — `docs/DOCKER.md`. `make build-all` builds
+under both when both are installed, which matters because the two runtimes keep
+separate image stores.
 
 ---
 
@@ -96,7 +103,7 @@ data/pepys_enriched_full.txt
   diarykg build          DiaryTransformer ingest → .diarykg/corpus/*.md
                          dockg build (--no-similar) → graph.sqlite + vectors.sqlite
         │
-        ▼  make build-image
+        ▼  make build
   docker build           FROM python:3.12-slim (NOT the kgrag-worker base)
                          CPU-only torch, then pinned kg-rag/kgmodule-utils/doc-kg/diary-kg
                          COPYs .diarykg/ into /workspace/pepys/

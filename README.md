@@ -70,6 +70,8 @@ make run
 The worker starts on `http://localhost:8000`. The diary index is baked into the
 image — no volumes, no model download, no setup.
 
+Runs anywhere Docker does — Linux, macOS, Windows. No Apple hardware required.
+
 ### 2. Open the chat app
 
 ```bash
@@ -79,6 +81,25 @@ make chat
 This opens the **Pepys chat app** in your browser at `http://localhost:8501` — the
 easiest way to explore the diary. Ask questions in plain English and read the entries
 that answer them; no command line required.
+
+Or bring up worker and chat together:
+
+```bash
+make up
+```
+
+### 3. Generated answers (optional)
+
+Search needs no LLM. For a narrative answer instead of ranked passages, install
+[Ollama](https://ollama.com) — cross-platform, no API key:
+
+```bash
+ollama pull qwen3:4b
+cp docker/.env.example docker/.env      # then set VLLM_ENDPOINT_URL / VLLM_MODEL
+```
+
+On Apple Silicon, [oMLX](https://omlx.ai) is the faster option (`make serve-llm`).
+Either way, see the [API Reference](docs/API.md#llm-synthesis) for the settings.
 
 → **[Read the User Guide](docs/USER_GUIDE.md)** for a full walkthrough.
 
@@ -123,6 +144,10 @@ of the Royal Navy.
 ## Documentation
 
 - **[User Guide](docs/USER_GUIDE.md)** — how to explore the diary with the chat app.
+- **[Running with Docker](docs/DOCKER.md)** — the default runtime, on any platform:
+  quick start, building, generated answers, and troubleshooting.
+- **[Apple `container` runtime](docs/APPLE_CONTAINERS.md)** — the Apple-Silicon
+  alternative to Docker Desktop (`RUNTIME=apple`).
 - **[API Reference](docs/API.md)** — HTTP endpoint, parameters, and LLM synthesis
   for scripting and integration.
 - **[Building from Source](docs/BUILDING.md)** — rebuilding the index, Docker

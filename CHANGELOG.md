@@ -7,11 +7,62 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-Consistency audit against `gutenberg_kg` — Docker build, chat UI, and dependency
-pins. The two repos serve the same stack from the same worker contract, so
-everywhere they disagreed was either a bug here or a trap waiting to become one.
+Two passes. First a consistency audit against `gutenberg_kg` — Docker build,
+chat UI, and dependency pins; the two repos serve the same stack from the same
+worker contract, so everywhere they disagreed was either a bug here or a trap
+waiting to become one. Then a runtime pass: Docker is the default and the only
+option most people have, but `make up` broke on any non-Apple host and the docs
+had drifted into presenting the Apple-Silicon setup as the normal one. Then a
+third: porting `gutenberg_kg`'s SDXL-Lightning image server, so image generation
+works on those hosts instead of merely being skipped.
 
 ### Added
+
+- **`docker/sdxl_server.py` (new)** — an SDXL-Lightning image server on `:8091`,
+  ported from `gutenberg_kg`, exposing the identical OpenAI-style
+  `/v1/images/generations` contract as the mflux one, so the worker only needs
+  `IMAGE_ENDPOINT` repointed. It resolves `cuda → mps → cpu`, so unlike FLUX it
+  runs on any host — fast on a GPU, usable on Apple Silicon, slow but working on
+  plain CPU. `make up` selects it wherever mflux cannot run, which means image
+  generation now *works* off Apple Silicon rather than being skipped.
+
+  Two deliberate divergences from `gutenberg_kg`'s copy, both worth porting
+  back. **torch is imported lazily**, behind `_torch()`, so the module can be
+  imported for tests or docs from an environment without the diffusers stack —
+  the same deferral `image_gen.py` already uses for mflux; the upstream copy
+  imports torch at module scope and so cannot be imported outside `.venv-sdxl`.
+  And **weights are fetched on first run** rather than requiring an existing
+  cache: upstream hard-wires `local_files_only=True`, which fails on a fresh
+  machine. `SDXL_OFFLINE=1` restores the strict behaviour once cached.
+- **`make sdxl-server`** and **`make sdxl-fetch`** — the latter pre-downloads the
+  ~7 GB of weights so the first `make up` is not a silent long wait. `.venv-sdxl`
+  is separate from `.venv-image` because mflux and diffusers pin conflicting
+  `transformers` ranges and cannot share a venv.
+- **`IMAGE_BACKEND`** selects the image server: `flux` where mflux can run,
+  `sdxl` everywhere else, overridable with `make up IMAGE_BACKEND=flux|sdxl`.
+  Forcing `flux` on an unsupported host fails with a message naming the
+  requirement and pointing at the SDXL alternative. Apple Silicon is unchanged.
+- **`tests/test_sdxl_server.py` (42 tests)** covering size parsing, step
+  resolution (a Lightning UNet's distilled count wins over a per-request
+  override), the offline flag, and the `cuda → mps → cpu` fallback. They need no
+  stubbing at all, which is the deferred-import design paying for itself.
+- **`docs/DOCKER.md` (new)** — the Docker counterpart to
+  `docs/APPLE_CONTAINERS.md`, which had no equivalent. Covers the pulled image
+  and the from-clone path, building, generated answers via Ollama, the everyday
+  targets and their raw `docker compose` equivalents, image generation, and
+  troubleshooting. Docker is the default runtime and works on Linux, macOS and
+  Windows; the docs had drifted into presenting the Apple-Silicon setup as the
+  normal one.
+- **`make build`**, the canonical build target in both runtime branches, matching
+  `gutenberg_kg`. `make build-image` stays as an alias — the README, the docs and
+  the changelog all reference it.
+- **`make build-all`** — builds under every container runtime installed on the
+  machine. Docker and Apple's `container` keep *separate image stores*, so on a
+  Mac with both, an image built by one is invisible to the other and
+  `make run RUNTIME=apple` after a Docker build silently has nothing to run. It
+  skips a runtime that is absent rather than failing.
+- **`make help` now reports what it detected** — which runtimes are installed,
+  the current one, and which image backend it selected.
 - **`.dockerignore` (new).** The build context is the repo root for both entry
   points (`make build-image` builds `.`, compose declares `context: ..`), and
   the image is built by `COPY .diarykg/` — so whatever `diarykg build` left in
@@ -35,9 +86,25 @@ everywhere they disagreed was either a bug here or a trap waiting to become one.
 - **`tests/test_chat.py` (23 tests)** covering the model blocklist and the
   `stats` fetch, plus **8 tests** for the handler's `stats` op. `tests/conftest.py`
   gained a streamlit stub whose `cache_data` is an identity decorator, so the
-  memoised chat helpers are testable at all. Suite: 57 → 88 tests.
+  memoised chat helpers are testable at all. With 3 more for synthesis-failure
+  degradation, the suite goes 57 → 91 tests.
 
 ### Changed
+
+- **The synthesis docs lead with Ollama rather than oMLX.** oMLX is
+  Apple-Silicon-only, and `docs/API.md`, `docs/USER_GUIDE.md` and
+  `docker/.env.example` all presented it as the recommended path with Ollama as a
+  footnote — which is backwards for most readers. Each now opens with a
+  platform-support table or the cross-platform setup, and keeps oMLX as the
+  documented Apple fast path. `README.md` gained a Docker-first quick start with
+  an optional-synthesis step. `docs/USER_GUIDE.md`'s link to
+  `API.md#alternative-ollama` was left dangling by the restructure and now points
+  at the current anchor.
+- **`docker/.env.example` explains the `/v1` requirement** and gives both the
+  Ollama and oMLX blocks inline, rather than shipping oMLX values with Ollama
+  mentioned only in passing. `IMAGE_ENDPOINT` is now listed explicitly — compose
+  reads it, but it was absent from the example file — with a note on what the
+  image server needs.
 - **The chat UI now filters the synthesis model list**, using the same
   `_MODEL_BLOCKLIST` as `gutenberg_kg`: reasoning models (Agents-A1, DeepSeek-R1,
   gpt-oss) whose chain-of-thought lands in the answer pane as prose, plus
@@ -90,6 +157,35 @@ everywhere they disagreed was either a bug here or a trap waiting to become one.
   tracked.
 
 ### Fixed
+
+- **`make up` failed on any host without Apple Silicon.** It unconditionally ran
+  `make image-server`, which builds `.venv-image` from
+  `docker/requirements-image.txt` and so installs mflux — and mflux needs Apple
+  MLX on macOS arm64, or `mlx[cuda13]` plus an NVIDIA GPU on Linux, and ships no
+  Windows wheel at all. On an ordinary x86 Docker host the pip install failed and
+  took `make up` down with it, *after* the worker and chat had already started —
+  so the whole stack looked broken when only an optional backend was missing.
+
+  `make up` now detects support and skips the image server with an explanation,
+  leaving search, synthesis and chat untouched; only the chat UI's "Render
+  response" button is unavailable. `make image-server` called directly still
+  fails, but with a readable message naming the requirement instead of a pip
+  resolution error. `FORCE_IMAGE_SERVER=1` overrides the check for the CUDA 13
+  Linux case, which mflux supports but the detection cannot see.
+- **`docs/API.md` documented an Ollama endpoint that cannot work.** It gave
+  `VLLM_ENDPOINT_URL=http://host.docker.internal:11434` with no `/v1`. The worker
+  speaks the OpenAI wire protocol, so without the suffix every synthesis request
+  404s while plain search keeps working — which reads as a broken feature rather
+  than a bad URL. The configuration table also listed defaults without `/v1`,
+  disagreeing with `docker-compose.yml` and `.env.example`, and described the
+  synthesis context as coming from `DiaryKG.pack()`, which the handler stopped
+  using when it moved to hydrating each hit's `content` from the index.
+- **The Docker `build` target skipped the daemon check.** The Apple branch has
+  always depended on `setup`; the Docker branch did not, so a stopped daemon gave
+  a raw `docker build` error there and a readable one on the other path.
+- **`make install` passed `--without dev` for a Poetry group that no longer
+  exists** — the dev tools moved to the PEP 621 `dev` extra in the previous
+  change, and extras are opt-in, so the flag now only earned a warning.
 - **The chat UI could not authenticate when `HANDLER_SECRET` was set.**
   `chat.py` reads `HANDLER_SECRET` and includes it in every request, but neither
   the compose `pepys-chat` service nor the Apple `chat-container` target passed
