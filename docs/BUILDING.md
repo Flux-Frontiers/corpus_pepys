@@ -44,14 +44,30 @@ make reindex
 
 ---
 
-## Phase 2 — Build the Docker image
+## Phase 2 — Build the container image
 
 ```bash
-make build-image
+make build
 ```
 
 Bakes the `.diarykg/` index into a self-contained image. The container needs
 no volumes at runtime — the index is embedded at build time.
+
+`make build` first runs `make check-pins`, which verifies the KG package
+versions in `poetry.lock` and `docker/Dockerfile` agree. They must: the index is
+written by the toolchain in Phase 1 and read by the container, and a mismatch
+fails *silently*, as empty query results rather than an error.
+
+Uses Docker by default. Add `RUNTIME=apple` for Apple's native `container` CLI
+(see [APPLE_CONTAINERS.md](APPLE_CONTAINERS.md)). On a machine with both
+installed, the two keep separate image stores, so an image built by one is
+invisible to the other:
+
+```bash
+make build-all      # builds under every runtime present; skips the absent ones
+```
+
+`make build-image` remains as an alias for `make build`.
 
 ---
 
@@ -98,7 +114,7 @@ data/pepys_enriched_full.txt   (7,282 enriched chunks)
         ▼
 .diarykg/                  Knowledge graph index
         │
-        ▼  make build-image
+        ▼  make build
   Docker image              KGRAG handler + baked-in index
         │
         ▼  docker push

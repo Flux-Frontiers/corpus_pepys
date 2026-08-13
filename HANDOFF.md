@@ -24,8 +24,8 @@ should be deliberate and commented, not incidental. See "Fleet consistency" belo
 | KGRAG worker (`make run`) | RunPod serverless API on `http://localhost:8000` |
 | Streamlit chat (`make chat` / `--profile chat`) | Pepys-specific UI on `:8501` |
 | Synthesis | oMLX / Ollama / OpenAI, selectable per request; off unless an endpoint is configured |
-| Image generation | Host-side FLUX via `make image-server`; routed through the worker's `imagine` op |
-| Tests | 88, no KGRAG environment required (`tests/conftest.py` stubs the stack) |
+| Image generation | Host-side FLUX via `make image-server` (Apple MLX or CUDA 13 only); routed through the worker's `imagine` op. `make up` skips it elsewhere |
+| Tests | 91, no KGRAG environment required (`tests/conftest.py` stubs the stack) |
 
 ---
 
@@ -72,9 +72,10 @@ make build-corpus   # re-run DiaryTransformer (only if pepys_enriched_full.txt c
 make build-index    # full diarykg build from pepys_enriched_full.txt (~3 min)
 make reindex        # rebuild SQLite + vectors.sqlite only, skip ingest (~1 min)
 make check-pins     # verify lock/Dockerfile/compose KG pins agree
-make build-image    # docker build — bakes .diarykg/ into corpus-pepys:latest
+make build          # build the image — bakes .diarykg/ into corpus-pepys:latest
+make build-all      # build under every runtime installed (docker + apple)
 make run            # worker on localhost:8000
-make up             # worker + chat + host image server
+make up             # worker + chat (+ host image server where supported)
 make chat           # streamlit run docker/chat.py (worker must already be up)
 make query          # smoke-test curl (set QUERY="..." to override)
 make stop           # halt containers, keep them
@@ -83,7 +84,10 @@ make clean          # rm -rf .diarykg/ + remove the image
 ```
 
 Every container target accepts `RUNTIME=apple` to drive Apple's native
-`container` CLI instead of Docker. See `docs/APPLE_CONTAINERS.md`.
+`container` CLI instead of Docker (`docs/APPLE_CONTAINERS.md`). Docker is the
+default and works on every platform — `docs/DOCKER.md`. `make build-all` builds
+under both when both are installed, which matters because the two runtimes keep
+separate image stores.
 
 ---
 
@@ -96,7 +100,7 @@ data/pepys_enriched_full.txt
   diarykg build          DiaryTransformer ingest → .diarykg/corpus/*.md
                          dockg build (--no-similar) → graph.sqlite + vectors.sqlite
         │
-        ▼  make build-image
+        ▼  make build
   docker build           FROM python:3.12-slim (NOT the kgrag-worker base)
                          CPU-only torch, then pinned kg-rag/kgmodule-utils/doc-kg/diary-kg
                          COPYs .diarykg/ into /workspace/pepys/

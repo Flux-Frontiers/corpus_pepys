@@ -1,4 +1,4 @@
-.PHONY: help setup install install-dev install-model check-pins build-corpus build-index reindex build-image run stop down logs image-server chat chat-container up query serve-llm test lint clean
+.PHONY: help setup install install-dev install-model check-pins build-corpus build-index reindex build build-image build-all run stop down logs image-server image-server-optional chat chat-container up query serve-llm test lint clean
 
 # Bare `make` prints help rather than installing: a cold `make install` pulls
 # torch + the spaCy stack, which is not what a stray keystroke should trigger.
@@ -16,21 +16,49 @@ IMAGE_SERVER  = http://localhost:8090
 # Container runtime — RUNTIME=docker (default) or RUNTIME=apple.
 # RUNTIME=apple drives Apple's native `container` CLI instead of Docker
 # (Apple Silicon + macOS 26; no Docker Desktop). First-time / per-boot setup
-# is automatic — build-image/run/up depend on `setup`, which installs the CLI
+# is automatic — build/run/up depend on `setup`, which installs the CLI
 # if missing (Homebrew) and runs `container system start`.
 # Same targets, one extra variable:
 #   make setup      RUNTIME=apple   — install `container` CLI + start services
-#   make build-image RUNTIME=apple  — build with `container build`
+#   make build      RUNTIME=apple   — build with `container build`
 #   make run        RUNTIME=apple   — worker on :8000 (idempotent)
-#   make up         RUNTIME=apple   — worker + chat UI + FLUX image server
+#   make up         RUNTIME=apple   — worker + chat UI (+ image server if supported)
 #   make down       RUNTIME=apple   — stop/delete containers + image server
 #   make logs       RUNTIME=apple   — follow worker logs
 #   make clean      RUNTIME=apple   — remove index + image
 # Per-container VM sizing (overridable): WORKER_MEM=8g WORKER_CPUS=6 CHAT_MEM=4g
 #   make run RUNTIME=apple WORKER_MEM=12g
-# See docs/APPLE_CONTAINERS.md for setup and caveats.
+# See docs/APPLE_CONTAINERS.md for setup and caveats, and docs/DOCKER.md for
+# the default Docker path (`make build-all` builds under both runtimes at once).
 # ------------------------------------------------------------------
 RUNTIME ?= docker
+
+# Which runtimes are actually present, for `make build-all` and for the help
+# text. Both are cheap `command -v` probes, evaluated once.
+HAVE_DOCKER := $(shell command -v docker >/dev/null 2>&1 && echo 1)
+HAVE_APPLE  := $(shell command -v container >/dev/null 2>&1 && echo 1)
+
+# ------------------------------------------------------------------
+# Can this host run the local FLUX image server?
+#
+# `make image-server` builds .venv-image from docker/requirements-image.txt,
+# which installs mflux. mflux is not portable: on macOS it needs Apple MLX
+# (arm64 only), on Linux it pulls mlx[cuda13] and so needs an NVIDIA GPU with
+# CUDA 13, and it publishes no Windows wheel at all. On an ordinary x86 Docker
+# host the pip install fails, and it used to take `make up` down with it —
+# after the worker and chat had already started, so the stack looked broken
+# when only the optional image backend was unavailable.
+#
+# Image generation is optional everywhere: the chat UI's "Render response"
+# button is the only thing that uses it, and the worker reaches it over HTTP,
+# so `make up` continues without it. Set FORCE_IMAGE_SERVER=1 to try anyway —
+# that is the escape hatch for a CUDA 13 Linux box, which is supported by mflux
+# but not detected here.
+# ------------------------------------------------------------------
+IMAGE_SERVER_OK := $(shell \
+  if [ "$(FORCE_IMAGE_SERVER)" = "1" ]; then echo 1; \
+  elif [ "$$(uname -s 2>/dev/null)" = "Darwin" ] && [ "$$(uname -m 2>/dev/null)" = "arm64" ]; then echo 1; \
+  fi)
 
 # Apple `container` settings (RUNTIME=apple only). Each container is its own
 # VM — memory is an explicit upper bound, not shared with the host like Docker
@@ -83,18 +111,26 @@ help:
 	@echo "  make build-index    Full build: ingest + index from $(CORPUS_SOURCE)"
 	@echo "  make reindex        Re-index only (skip ingest, use existing corpus .md files)"
 	@echo "  make check-pins     Verify lock/Dockerfile/compose KG pins agree"
-	@echo "  make build-image    Build Docker image (requires .diarykg/ from build-index)"
+	@echo "  make build          Build the image for the selected runtime"
+	@echo "  make build-all      Build for every runtime installed on this machine"
 	@echo "  make run            Start the KGRAG service on http://localhost:8000"
+	@echo "  make up             Worker + chat UI (+ image server where supported)"
 	@echo "  make stop           Stop the service"
+	@echo "  make down           Stop and remove the containers"
 	@echo "  make chat           Launch Streamlit chat UI (worker must be running)"
 	@echo "  make query          Fire a test query (set QUERY='...' to override)"
 	@echo "  make serve-llm      Start oMLX synthesis backend on http://localhost:$(OMLX_PORT)"
 	@echo "  make logs           Follow worker logs"
 	@echo "  make clean          Remove generated index and image"
 	@echo ""
-	@echo "  Add RUNTIME=apple to any container target to use Apple's native"
-	@echo "  'container' CLI instead of Docker (e.g. make up RUNTIME=apple)."
+	@echo "  Runtime: RUNTIME=docker (default) or RUNTIME=apple for Apple's"
+	@echo "  native 'container' CLI (e.g. make up RUNTIME=apple)."
 	@echo "  Current runtime: $(RUNTIME)"
+	@echo "  Detected:  docker=$(if $(HAVE_DOCKER),yes,no)  container=$(if $(HAVE_APPLE),yes,no)"
+	@echo "  Local image server supported here: $(if $(IMAGE_SERVER_OK),yes,no)"
+	@echo ""
+	@echo "  Synthesis is optional. Ollama works everywhere; oMLX is the faster"
+	@echo "  Apple-Silicon option. See docs/API.md."
 
 # ------------------------------------------------------------------
 # Phase 0: build toolchain
@@ -106,10 +142,12 @@ help:
 # container cannot read.
 # ------------------------------------------------------------------
 # One-shot setup for a fresh clone: runtime + the NLP build toolchain + the
-# spaCy model. Dev tooling is deliberately excluded — `--without dev` is
-# required because Poetry installs the dev *group* by default.
+# spaCy model. Dev tooling is excluded simply by not asking for it: the dev
+# tools live in the PEP 621 `dev` extra, and extras are opt-in. (This used to
+# pass `--without dev` for a Poetry dev *group*, which Poetry installs by
+# default — that group is gone, and naming it now only earns a warning.)
 install:
-	poetry install --extras build --without dev
+	poetry install --extras build
 	@$(MAKE) --no-print-directory install-model
 	@echo "Done. Environment ready."
 
@@ -184,6 +222,14 @@ reindex:
 # can reach it over the vmnet — 127.0.0.1 would be invisible from there.
 # ------------------------------------------------------------------
 image-server:
+	@if [ "$(IMAGE_SERVER_OK)" != "1" ]; then \
+		echo "ERROR: this host cannot run the local FLUX image server."; \
+		echo "  mflux needs Apple MLX (macOS arm64), or mlx[cuda13] on a Linux box"; \
+		echo "  with an NVIDIA GPU. It ships no Windows wheel."; \
+		echo "  Image generation is optional — everything else works without it."; \
+		echo "  Re-run with FORCE_IMAGE_SERVER=1 to try anyway (CUDA 13 Linux)."; \
+		exit 1; \
+	fi
 	@if [ ! -x .venv-image/bin/python ]; then \
 		echo "Creating .venv-image for isolated image dependencies ..."; \
 		python3 -m venv .venv-image; \
@@ -192,6 +238,54 @@ image-server:
 	@.venv-image/bin/python -m pip install --quiet -r docker/requirements-image.txt
 	@echo "Starting FLUX image server on $(IMAGE_SERVER) (background, .venv-image) ..."
 	MFLUX_SERVER_HOST=0.0.0.0 .venv-image/bin/python docker/image_server.py &
+
+# ------------------------------------------------------------------
+# `build-image` is the old name for `build`. Kept as an alias because the
+# README, docs/BUILDING.md and the CHANGELOG all reference it, and because it
+# is what anyone with muscle memory from before will type. `build` is the
+# canonical name and matches gutenberg_kg.
+# ------------------------------------------------------------------
+build-image: build
+
+# Build the image under EVERY runtime installed on this machine, rather than
+# only the one RUNTIME selects. Useful on a Mac carrying both Docker Desktop
+# and Apple's `container` CLI: the two keep separate image stores, so an image
+# built by one is invisible to the other and `make run RUNTIME=apple` after a
+# Docker build silently has nothing to run.
+#
+# Skips a runtime that is not installed rather than failing — on Linux there is
+# no `container` CLI and that is not an error. Fails only if neither is present.
+build-all:
+	@if [ -z "$(HAVE_DOCKER)$(HAVE_APPLE)" ]; then \
+		echo "ERROR: neither Docker nor Apple's 'container' CLI is installed."; \
+		exit 1; \
+	fi
+	@if [ "$(HAVE_DOCKER)" = "1" ]; then \
+		echo "==> Building with Docker ..."; \
+		$(MAKE) --no-print-directory build RUNTIME=docker; \
+	else \
+		echo "==> Skipping Docker — not installed."; \
+	fi
+	@if [ "$(HAVE_APPLE)" = "1" ]; then \
+		echo "==> Building with Apple container ..."; \
+		$(MAKE) --no-print-directory build RUNTIME=apple; \
+	else \
+		echo "==> Skipping Apple container — not installed."; \
+	fi
+
+# What `make up` calls. Starting the image server is best-effort: it is an
+# optional backend for one button in the chat UI, so a host that cannot run it
+# gets a note, not a failed `up` with the worker and chat already running.
+image-server-optional:
+	@if [ "$(IMAGE_SERVER_OK)" = "1" ]; then \
+		echo "Starting FLUX image server in background ..."; \
+		$(MAKE) --no-print-directory image-server; \
+	else \
+		echo "Skipping the FLUX image server — unsupported on this host."; \
+		echo "  (needs Apple MLX on macOS arm64, or CUDA 13 on Linux.)"; \
+		echo "  Search, chat and synthesis are unaffected; only the chat UI's"; \
+		echo "  'Render response' button is unavailable."; \
+	fi
 
 ifeq ($(RUNTIME),apple)
 
@@ -229,10 +323,10 @@ setup:
 	@container system start --enable-kernel-install
 	@echo "Apple container runtime ready."
 
-build-image: check-pins setup
+build: check-pins setup
 	@test -d .diarykg || (echo "ERROR: .diarykg/ not found — run 'make build-index' first" && exit 1)
 	container build -f docker/Dockerfile -t $(IMAGE_NAME):latest .
-	@echo "Done. Image built: $(IMAGE_NAME):latest"
+	@echo "Done. Image built: $(IMAGE_NAME):latest  (runtime: apple)"
 
 # Idempotent like `compose up`: a running worker is left alone (it takes a
 # while to load the index and embedder), a stopped or stale one is replaced.
@@ -280,11 +374,9 @@ chat-container: run
 	@echo "Chat UI: http://localhost:8501"
 
 up: chat-container
-	@echo "Starting FLUX image server in background ..."
-	$(MAKE) image-server
+	@$(MAKE) --no-print-directory image-server-optional
 	@echo ""
 	@echo "Worker:       http://localhost:8000"
-	@echo "Image server: $(IMAGE_SERVER)"
 	@echo "Chat UI:      http://localhost:8501"
 	@echo ""
 	@echo "Run 'make down RUNTIME=apple' to shut down."
@@ -316,10 +408,10 @@ setup:
 	@docker info >/dev/null 2>&1 || { echo "Docker daemon not running — start Docker Desktop, or use RUNTIME=apple."; exit 1; }
 	@echo "Docker runtime ready."
 
-build-image: check-pins
+build: check-pins setup
 	@test -d .diarykg || (echo "ERROR: .diarykg/ not found — run 'make build-index' first" && exit 1)
 	docker build -f docker/Dockerfile -t $(IMAGE_NAME):latest .
-	@echo "Done. Image built: $(IMAGE_NAME):latest"
+	@echo "Done. Image built: $(IMAGE_NAME):latest  (runtime: docker)"
 
 run:
 	$(COMPOSE) up -d pepys-worker
@@ -340,11 +432,9 @@ logs:
 up:
 	@echo "Starting worker + chat (Docker) ..."
 	$(COMPOSE) --profile chat up -d
-	@echo "Starting FLUX image server in background ..."
-	$(MAKE) image-server
+	@$(MAKE) --no-print-directory image-server-optional
 	@echo ""
 	@echo "Worker:       http://localhost:8000"
-	@echo "Image server: $(IMAGE_SERVER)"
 	@echo "Chat UI:      http://localhost:8501"
 
 endif

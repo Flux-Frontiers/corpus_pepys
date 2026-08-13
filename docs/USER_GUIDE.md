@@ -87,23 +87,37 @@ By default the app returns diary passages only — fast and fully offline. To ge
 **narrative answer** written from those passages, you need a local LLM server
 running and the **Generate answer** toggle on.
 
-On Apple Silicon, [oMLX](https://omlx.ai) is the fast option — answers come back in
-about a second:
+[Ollama](https://ollama.com) is the simplest option and runs on Linux, macOS and
+Windows with no API key:
 
 ```bash
-make serve-llm                 # starts oMLX on http://localhost:8080
+ollama pull qwen3:4b
 cp docker/.env.example docker/.env
-# defaults already point at oMLX; set VLLM_API_KEY to your oMLX key
-make run
 ```
 
-Then flip **Generate answer** in the sidebar. Questions now return a written reply
+Then set these in `docker/.env` and restart the worker (`make down && make up`):
+
+```bash
+VLLM_ENDPOINT_URL=http://host.docker.internal:11434/v1
+VLLM_MODEL=qwen3:4b
+VLLM_API_KEY=
+```
+
+Now flip **Generate answer** in the sidebar. Questions return a written reply
 grounded in the retrieved entries, with the source passages still available below.
 
-> Prefer cross-platform? [Ollama](https://ollama.com) works too — see the
-> [API Reference](API.md#alternative-ollama) for the settings. Either way, with no
-> LLM configured, leave **Generate answer** off — the passage view works on its own
-> and is the fastest way to read the diary.
+You can also switch backend from the sidebar's **Provider** dropdown without
+touching `docker/.env` — *Ollama*, *oMLX*, or *OpenAI*.
+
+> **On Apple Silicon?** [oMLX](https://omlx.ai) is faster — answers in about a
+> second. `make serve-llm` starts it on port 8080, and the shipped
+> `docker/.env.example` already points there; you only need to set `VLLM_API_KEY`
+> to your oMLX key. It is macOS/M-series only.
+
+> With no LLM configured at all, leave **Generate answer** off — the passage view
+> works on its own and is the fastest way to read the diary.
+
+Full settings for every backend: [API Reference](API.md#llm-synthesis).
 
 ---
 

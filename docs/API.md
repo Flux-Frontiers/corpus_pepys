@@ -121,25 +121,64 @@ Set `"synthesize": true` to get a generated answer grounded in the retrieved
 passages instead of just the ranked hit list. This requires a local LLM server
 exposing an OpenAI-compatible `/v1/chat/completions` endpoint.
 
-### Recommended: oMLX (Apple Silicon)
+Two backends are supported locally, plus OpenAI. Pick by platform:
+
+| Backend | Platform | Notes |
+|---|---|---|
+| **Ollama** | Linux · macOS · Windows | The portable choice. No API key. Start here unless you are on Apple Silicon. |
+| **oMLX** | macOS, Apple Silicon only | Faster on an M-series Mac; multi-model. Needs an API key. |
+| **OpenAI** | anywhere | Cloud. Set `OPENAI_API_KEY` and pick *OpenAI* in the chat sidebar. |
+
+The chat UI's **Provider** dropdown switches between them per request, so the
+`docker/.env` values below are only the defaults.
+
+### Ollama (cross-platform — start here)
+
+[Ollama](https://ollama.com) runs on Linux, macOS and Windows and needs no API
+key. Install it, pull a model, and point the worker at it:
+
+```bash
+ollama pull qwen3:4b
+```
+
+```bash
+cp docker/.env.example docker/.env
+```
+
+Then in `docker/.env`:
+
+```bash
+VLLM_ENDPOINT_URL=http://host.docker.internal:11434/v1
+VLLM_MODEL=qwen3:4b
+VLLM_API_KEY=
+```
+
+The `/v1` suffix is **required** — the worker speaks the OpenAI wire protocol,
+and Ollama serves it under `/v1`. Without it every synthesis request 404s while
+plain search keeps working, which reads as "synthesis is broken" rather than a
+bad URL.
+
+> On Linux, `host.docker.internal` resolves because `docker/docker-compose.yml`
+> declares `extra_hosts: host.docker.internal:host-gateway`. If you run the
+> container by hand rather than through compose, add that flag or point
+> `VLLM_ENDPOINT_URL` at the host's real address.
+
+### oMLX (Apple Silicon fast path)
 
 [oMLX](https://omlx.ai) is a fast, multi-model, OpenAI-compatible server for
-Apple Silicon. The worker runs on port 8000, so start oMLX on **8080**:
+Apple Silicon — **macOS on M-series hardware only**. The worker runs on port
+8000, so start oMLX on **8080**:
 
 ```bash
 make serve-llm                 # starts oMLX on http://localhost:8080
 ```
 
-Point the worker at it:
+The shipped `docker/.env.example` defaults already target it; set `VLLM_API_KEY`
+to your oMLX key (`~/.omlx/settings.json` → `auth.api_key`).
 
-```bash
-cp docker/.env.example docker/.env
-# defaults already target oMLX on host.docker.internal:8080
-# set VLLM_API_KEY to your oMLX key (~/.omlx/settings.json → auth.api_key)
-make run
-```
+### Querying with synthesis on
 
-Then query with synthesis enabled:
+Same call whichever backend you chose:
 
 ```bash
 curl -s -X POST http://localhost:8000/runsync \
@@ -148,26 +187,23 @@ curl -s -X POST http://localhost:8000/runsync \
 ```
 
 The synthesised answer is built from the full text of the retrieved diary
-entries (via `DiaryKG.pack()`), not the truncated summaries — so it quotes
-real passages with their dates. Any `<think>…</think>` reasoning blocks from
+entries — the handler hydrates each hit's `content` from the index before
+passing it to synthesis, so the model sees whole passages rather than truncated
+summaries, and quotes real dates. Any `<think>…</think>` reasoning blocks from
 the model are stripped before the answer is returned.
 
-### Alternative: Ollama
-
-Cross-platform. Set in `docker/.env`:
-
-```bash
-VLLM_ENDPOINT_URL=http://host.docker.internal:11434
-VLLM_MODEL=qwen3:4b
-VLLM_API_KEY=
-```
+If the backend is unreachable the query still succeeds: the response carries the
+hits plus a `synthesis_error` string, and the chat UI shows the passages with a
+warning rather than failing.
 
 ### Configuration
 
 | Variable | Default | Description |
 |---|---|---|
-| `VLLM_ENDPOINT_URL` | `http://host.docker.internal:8080` | OpenAI-compatible base URL (oMLX `:8080`, Ollama `:11434`) |
-| `VLLM_MODEL` | `Qwen3-4B-Instruct-2507-MLX-8bit` | Model ID used for synthesis |
+| `VLLM_ENDPOINT_URL` | `http://host.docker.internal:8080/v1` | OpenAI-compatible base URL. oMLX `:8080/v1`, Ollama `:11434/v1` — include `/v1` |
+| `VLLM_MODEL` | `Qwen3-4B-Instruct-2507-MLX-8bit` | Model ID used for synthesis. For Ollama use an Ollama tag, e.g. `qwen3:4b` |
 | `VLLM_API_KEY` | _(empty)_ | Bearer token for the endpoint (your oMLX key; leave empty for Ollama) |
+| `OLLAMA_ENDPOINT` | `http://host.docker.internal:11434/v1` | Used when the chat UI's Provider dropdown is set to *Ollama* |
+| `OPENAI_API_KEY` | _(unset)_ | Required only for the *OpenAI* provider |
 | `HANDLER_SECRET` | _(unset)_ | Optional shared secret; when set, requests must include `"secret"` |
 | `EMBED_MODEL` | `BAAI/bge-small-en-v1.5` | Sentence-transformer model for query embedding |

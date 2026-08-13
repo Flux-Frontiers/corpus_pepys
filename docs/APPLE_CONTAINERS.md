@@ -5,7 +5,9 @@ and verified end-to-end on Apple Silicon / macOS 26 with `container` CLI 1.1.0
 (2026-08-03). Mirrors the same arrangement in
 [gutenberg_kg](https://github.com/Flux-Frontiers/gutenberg_kg).*
 
-Docker remains the default. Nothing changes unless you pass `RUNTIME=apple`.
+Docker remains the default, and is what most people should use — see
+[DOCKER.md](DOCKER.md). Nothing on this page applies unless you pass
+`RUNTIME=apple`.
 
 ## Using it
 
@@ -15,9 +17,9 @@ Requirements: Apple Silicon, macOS 26 (Tahoe), and Apple's
 
 ```sh
 make setup       RUNTIME=apple   # installs the CLI if missing + `container
-                                 # system start`; build-image/run depend on it,
+                                 # system start`; build/run depend on it,
                                  # so calling it directly is optional
-make build-image RUNTIME=apple   # container build -f docker/Dockerfile
+make build       RUNTIME=apple   # container build -f docker/Dockerfile
 make run         RUNTIME=apple   # worker on http://localhost:8000
 make up          RUNTIME=apple   # worker + chat UI + FLUX image server
 make logs        RUNTIME=apple   # container logs -f pepys-worker
