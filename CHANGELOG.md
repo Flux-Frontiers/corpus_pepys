@@ -7,6 +7,26 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **`tests/test_sdxl_server.py` tested the wrong thing.** Its import-deferral
+  check asserted `"torch" not in sys.modules` — global interpreter state, which
+  says nothing about what *this* module imports. It passed here only because
+  torch is absent from this project's test environment, and that absence cannot
+  distinguish "the module does not import torch" from "torch is not installed".
+  The same test failed the moment it ran in `gutenberg_kg`, where torch arrives
+  transitively via doc-kg and other test modules load it first.
+
+  Replaced with a static check: parse the module source and assert no top-level
+  import of torch, diffusers, uvicorn, huggingface_hub or safetensors. Function-
+  level imports are deferred by construction and never appear in `tree.body`;
+  `if TYPE_CHECKING:` blocks are skipped because they do not execute, and a
+  companion test pins that the `TYPE_CHECKING` `import torch` is still present,
+  so the check cannot be satisfied by deleting the type annotation. Verified in
+  both directions with the heavy modules pre-seeded into `sys.modules`: all 44
+  pass with them loaded, and reintroducing a module-scope `import torch` fails
+  the check rather than passing vacuously.
+
 Two passes. First a consistency audit against `gutenberg_kg` — Docker build,
 chat UI, and dependency pins; the two repos serve the same stack from the same
 worker contract, so everywhere they disagreed was either a bug here or a trap

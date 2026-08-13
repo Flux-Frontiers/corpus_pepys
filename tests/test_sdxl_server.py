@@ -1,28 +1,77 @@
 """Unit tests for docker/sdxl_server.py — the portable image backend.
 
-The module imports cleanly here with **no stubbing at all**: torch and diffusers
-are deferred behind ``_torch()`` / ``_load_pipeline()`` so only an actual render
-needs the isolated ``.venv-sdxl``. That is the point of the deferral, and the
-first test pins it — gutenberg_kg's copy imports torch at module scope and so
-cannot be imported outside that venv.
+The module imports cleanly here with **no stubbing at all**: torch, diffusers
+and uvicorn are deferred behind ``_torch()`` / ``_load_pipeline()`` / ``main()``,
+so only an actual render needs the isolated ``.venv-sdxl``. That is the point of
+the deferral, and the first test pins it.
+
+That invariant is checked statically rather than through ``sys.modules``: this
+suite shares an interpreter with everything else, so global module state says
+nothing about what *this* module pulls in. An earlier version asserted
+``"torch" not in sys.modules`` and passed here only because torch is absent from
+this project's test environment — it failed the moment the same test ran in
+gutenberg_kg, where torch arrives transitively via doc-kg.
 """
 
 from __future__ import annotations
 
+import pathlib
 from unittest.mock import MagicMock, patch
 
 import pytest
 import sdxl_server  # docker/ is on sys.path via conftest
 
+# Modules that must not be imported when this one is, so it stays importable
+# outside .venv-sdxl. torch and diffusers are the heavy pair; uvicorn is only
+# needed to actually serve; huggingface_hub and safetensors ride along with
+# diffusers.
+_DEFERRED = {"torch", "diffusers", "uvicorn", "huggingface_hub", "safetensors"}
+
+
+def _module_scope_imports() -> set[str]:
+    """Top-level imports actually executed when the module is imported.
+
+    Parsed from the source rather than probed via ``sys.modules``: this suite
+    shares an interpreter with tests that legitimately import torch, so global
+    module state says nothing about what *this* module pulls in. Imports inside
+    functions are deferred by construction and so are not in ``tree.body``, and
+    an ``if TYPE_CHECKING:`` block never runs, so both are skipped.
+    """
+    import ast
+
+    tree = ast.parse(pathlib.Path(sdxl_server.__file__).read_text())
+    names: set[str] = set()
+    for node in tree.body:
+        if isinstance(node, ast.If):
+            continue  # `if TYPE_CHECKING:` — not executed at runtime
+        if isinstance(node, ast.Import):
+            names.update(a.name.split(".")[0] for a in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+            names.add(node.module.split(".")[0])
+    return names
+
 
 class TestImportsWithoutTheHeavyStack:
-    def test_module_imported_without_torch_or_diffusers(self):
-        import sys
+    def test_no_heavy_module_is_imported_at_module_scope(self):
+        # The regression this file exists to prevent: torch used to be imported
+        # here, which made the module unimportable outside .venv-sdxl and so
+        # untestable at all.
+        assert _module_scope_imports() & _DEFERRED == set()
 
-        assert "torch" not in sys.modules
-        assert "diffusers" not in sys.modules
+    def test_type_checking_block_may_still_reference_torch(self):
+        # The `if TYPE_CHECKING: import torch` that types _device_dtype is fine
+        # — it never executes — so the check above must not flag it.
+        source = pathlib.Path(sdxl_server.__file__).read_text()
+        assert "import torch" in source
+
+    def test_torch_is_not_bound_on_the_module_at_runtime(self):
+        # Complements the static check: _torch() returns the module rather than
+        # binding it globally, so nothing re-exports it by accident.
+        assert not hasattr(sdxl_server, "torch")
 
     def test_torch_helper_raises_a_directive_not_an_importerror(self):
+        # `None` in sys.modules makes `import torch` raise ModuleNotFoundError,
+        # so this exercises the real handler whether or not torch is installed.
         with patch.dict("sys.modules", {"torch": None}):
             with pytest.raises(RuntimeError, match="make sdxl-server"):
                 sdxl_server._torch()
@@ -84,8 +133,8 @@ class TestOffline:
         assert sdxl_server._offline() is False
 
     def test_unset_defaults_to_downloads_enabled(self, monkeypatch):
-        # A fresh machine must be able to fetch weights, or the portable backend
-        # is not portable. gutenberg_kg's copy is hard-wired local-files-only.
+        # A fresh machine must be able to fetch weights, or the portable
+        # backend is not portable.
         monkeypatch.delenv("SDXL_OFFLINE", raising=False)
         assert sdxl_server._offline() is False
 
