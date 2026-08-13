@@ -45,6 +45,8 @@ Request schema
   "op":             str   — "models"  → {"models": [...], "default": ...}
                             "rewrite" → {"prompt": "...", "error": ...}
                             "imagine" → {"image_b64": "...", "prompt": ..., "aspect_ratio": ...}
+                            "stats"   → {"entries", "chunks", "nodes", "edges",
+                                         "vectors", "embed_model"}
   "text":           str   — passage to rewrite (required when op="rewrite")
   "prompt":         str   — image prompt (required when op="imagine")
   "aspect_ratio":   str   — one of 1:1 3:2 2:3 16:9 9:16 4:3 3:4  (default: 3:2)
@@ -261,6 +263,40 @@ def _attach_diary_fields(hits: list[dict]) -> None:
         h["timestamp"] = ts
 
 
+def _stats() -> dict:
+    """Report live index totals for the chat sidebar's ``stats`` op.
+
+    Counts are read from the served index itself rather than baked into the UI,
+    so they cannot drift from whatever ``make build-index`` last produced.
+
+    ``entries`` is the number of distinct source files behind the chunk nodes:
+    ``diarykg build`` writes one ``.diarykg/corpus/<date>.md`` per diary entry
+    and every chunk carries its ``file_path``, so distinct paths == diary days.
+
+    :returns: Totals dict, or ``{"error": ...}`` when the index is unreadable.
+    """
+    if not _PEPYS_SQLITE.exists():
+        return {"error": "index not found"}
+    try:
+        with sqlite3.connect(f"file:{_PEPYS_SQLITE}?mode=ro", uri=True) as con:
+            chunks, entries = con.execute(
+                "SELECT COUNT(*), COUNT(DISTINCT file_path) FROM nodes WHERE kind = 'chunk'"
+            ).fetchone()
+            nodes = con.execute("SELECT COUNT(*) FROM nodes").fetchone()[0]
+            edges = con.execute("SELECT COUNT(*) FROM edges").fetchone()[0]
+    except sqlite3.Error as exc:
+        return {"error": str(exc)}
+
+    return {
+        "entries": entries,
+        "chunks": chunks,
+        "nodes": nodes,
+        "edges": edges,
+        "vectors": _PEPYS_STORE.count() if _PEPYS_STORE is not None else 0,
+        "embed_model": EMBED_MODEL,
+    }
+
+
 def _semantic_search(
     query: str,
     k: int,
@@ -304,6 +340,10 @@ def handler(job: dict) -> dict:
     aux_result = handle_aux_ops(inp, _synth_for_backend, _image_for_backend)
     if aux_result is not None:
         return aux_result
+
+    # Corpus-specific op; handle_aux_ops only knows models/rewrite/imagine.
+    if inp.get("op") == "stats":
+        return _stats()
 
     query = inp.get("query", "").strip()
     corpus = inp.get("corpus", "all")

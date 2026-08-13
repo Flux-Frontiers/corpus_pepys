@@ -272,6 +272,7 @@ chat-container: run
 	  --memory $(CHAT_MEM) \
 	  --publish 8501:8501 \
 	  -e KGRAG_ENDPOINT="http://$(APPLE_HOST_GW):8000" \
+	  -e HANDLER_SECRET="$${HANDLER_SECRET:-}" \
 	  -e IMAGE_ENDPOINT="$$IMAGE_ENDPOINT" \
 	  -e IMAGE_STEPS="$${IMAGE_STEPS:-4}" \
 	  $(IMAGE_NAME):latest \
@@ -287,6 +288,14 @@ up: chat-container
 	@echo "Chat UI:      http://localhost:8501"
 	@echo ""
 	@echo "Run 'make down RUNTIME=apple' to shut down."
+
+# `stop` halts the containers but keeps them (and the loaded index) around, so
+# `make run` restarts without re-reading the graph and re-warming the embedder.
+# `down` deletes them. Both are advertised in `help`; only `down` existed, so
+# `make stop` failed with "No rule to make target".
+stop:
+	-container stop $(CHAT_NAME) $(WORKER_NAME) 2>/dev/null || true
+	-pkill -f image_server.py 2>/dev/null || true
 
 down:
 	-container delete -f $(CHAT_NAME) $(WORKER_NAME) 2>/dev/null || true
@@ -315,6 +324,11 @@ build-image: check-pins
 run:
 	$(COMPOSE) up -d pepys-worker
 	@echo "Pepys KGRAG running on http://localhost:8000"
+
+# See the RUNTIME=apple branch above for why both `stop` and `down` exist.
+stop:
+	$(COMPOSE) --profile chat stop
+	-pkill -f image_server.py 2>/dev/null || true
 
 down:
 	$(COMPOSE) --profile chat down

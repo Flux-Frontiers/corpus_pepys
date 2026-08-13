@@ -325,3 +325,125 @@ class TestHandlerDispatch:
         assert result["synthesis"] == "mock synthesis"
         assert result["synthesis_ms"] is not None
         assert result["model"] is not None
+
+
+# ---------------------------------------------------------------------------
+# _stats  (the "stats" op backing the chat sidebar's live corpus counts)
+# ---------------------------------------------------------------------------
+
+
+def _build_index(path, rows, edges=0):
+    """Create a minimal DiaryKG-shaped graph.sqlite for the stats tests."""
+    with sqlite3.connect(str(path)) as con:
+        con.execute("CREATE TABLE nodes (id TEXT, kind TEXT, file_path TEXT)")
+        con.execute("CREATE TABLE edges (src TEXT, rel TEXT, dst TEXT)")
+        con.executemany("INSERT INTO nodes VALUES (?, ?, ?)", rows)
+        con.executemany(
+            "INSERT INTO edges VALUES (?, ?, ?)",
+            [(f"n{i}", "REL", f"n{i + 1}") for i in range(edges)],
+        )
+
+
+class TestStats:
+    def test_missing_index_reports_error(self, tmp_path):
+        with patch.object(handler, "_PEPYS_SQLITE", tmp_path / "absent.sqlite"):
+            assert handler._stats() == {"error": "index not found"}
+
+    def test_entries_are_distinct_source_files_not_chunk_count(self, tmp_path):
+        # Two chunks per entry across three entries — the distinction the chat
+        # sidebar renders as "N entries · M indexed chunks".
+        db = tmp_path / "graph.sqlite"
+        _build_index(
+            db,
+            [(f"c{i}", "chunk", f"corpus/{i // 2}.md") for i in range(6)],
+            edges=4,
+        )
+        with (
+            patch.object(handler, "_PEPYS_SQLITE", db),
+            patch.object(handler, "_PEPYS_STORE", None),
+        ):
+            stats = handler._stats()
+
+        assert stats["entries"] == 3
+        assert stats["chunks"] == 6
+        assert stats["nodes"] == 6
+        assert stats["edges"] == 4
+
+    def test_non_chunk_nodes_counted_in_nodes_but_not_chunks(self, tmp_path):
+        db = tmp_path / "graph.sqlite"
+        _build_index(
+            db,
+            [
+                ("c1", "chunk", "corpus/1.md"),
+                ("s1", "section", "corpus/1.md"),
+                ("e1", "entity", None),
+            ],
+        )
+        with (
+            patch.object(handler, "_PEPYS_SQLITE", db),
+            patch.object(handler, "_PEPYS_STORE", None),
+        ):
+            stats = handler._stats()
+
+        assert stats["chunks"] == 1
+        assert stats["entries"] == 1
+        assert stats["nodes"] == 3
+
+    def test_vector_count_read_from_open_store(self, tmp_path):
+        db = tmp_path / "graph.sqlite"
+        _build_index(db, [("c1", "chunk", "corpus/1.md")])
+        store = MagicMock()
+        store.count = MagicMock(return_value=7282)
+        with (
+            patch.object(handler, "_PEPYS_SQLITE", db),
+            patch.object(handler, "_PEPYS_STORE", store),
+        ):
+            stats = handler._stats()
+
+        assert stats["vectors"] == 7282
+        assert stats["embed_model"] == handler.EMBED_MODEL
+
+    def test_vectors_zero_when_store_unopened(self, tmp_path):
+        db = tmp_path / "graph.sqlite"
+        _build_index(db, [("c1", "chunk", "corpus/1.md")])
+        with (
+            patch.object(handler, "_PEPYS_SQLITE", db),
+            patch.object(handler, "_PEPYS_STORE", None),
+        ):
+            assert handler._stats()["vectors"] == 0
+
+    def test_corrupt_index_returns_error_not_raise(self, tmp_path):
+        db = tmp_path / "graph.sqlite"
+        db.write_text("this is not a sqlite database")
+        with (
+            patch.object(handler, "_PEPYS_SQLITE", db),
+            patch.object(handler, "_PEPYS_STORE", None),
+        ):
+            stats = handler._stats()
+        assert "error" in stats
+
+    def test_handler_dispatches_stats_op_without_a_query(self, tmp_path):
+        db = tmp_path / "graph.sqlite"
+        _build_index(db, [("c1", "chunk", "corpus/1.md")])
+        with (
+            patch.object(handler, "HANDLER_SECRET", ""),
+            patch.object(handler, "_PEPYS_SQLITE", db),
+            patch.object(handler, "_PEPYS_STORE", None),
+        ):
+            result = handler.handler({"input": {"op": "stats"}})
+
+        # Must not fall through to the query path, which would say
+        # "query is required".
+        assert result["entries"] == 1
+        assert "error" not in result
+
+    def test_stats_op_still_honours_handler_secret(self, tmp_path):
+        db = tmp_path / "graph.sqlite"
+        _build_index(db, [("c1", "chunk", "corpus/1.md")])
+        with (
+            patch.object(handler, "HANDLER_SECRET", "s3cret"),
+            patch.object(handler, "_PEPYS_SQLITE", db),
+        ):
+            assert handler.handler({"input": {"op": "stats"}}) == {"error": "unauthorized"}
+            ok = handler.handler({"input": {"op": "stats", "secret": "s3cret"}})
+        assert ok["entries"] == 1

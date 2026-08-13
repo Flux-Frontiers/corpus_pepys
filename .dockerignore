@@ -1,0 +1,72 @@
+# Docker build context filter.
+#
+# The build context is the REPO ROOT for both entry points — `make build-image`
+# runs `docker build ... .` and docker-compose declares `context: ..` — so
+# everything below is otherwise shipped to the daemon on every build, and the
+# `COPY .diarykg/` line bakes whatever it finds straight into the image.
+#
+# Mirrors gutenberg_kg/.dockerignore; the entries differ only where this repo
+# COPYs `.diarykg/` directly instead of a pre-packed bundle.
+
+# ---------------------------------------------------------------------------
+# Index artefacts that must NOT be baked into the image
+# ---------------------------------------------------------------------------
+# DiaryKG's copy of the source corpus (.diarykg/corpus/*.md). `diarykg build`
+# writes it so `make reindex` can re-run without the raw text, and `make reindex`
+# requires it on disk — but the served handler only ever opens graph.sqlite and
+# vectors.sqlite, so in the image it is pure dead weight.
+.diarykg/corpus
+
+# Build-only embedding caches — never ship these, they can be several GB.
+**/embeddings.json
+**/embeddings.jsonl
+
+# Transient SQLite sidecars. The served DB opens fresh, and a WAL copied
+# without its DB is worse than useless.
+**/*.sqlite-wal
+**/*.sqlite-shm
+**/*.sqlite-journal
+
+# LanceDB stores — dead weight since the sqlite-vec migration (doc-kg >=0.18.2).
+# `diarykg build` writes vectors.sqlite and the handler opens only that, but it
+# does not delete a lancedb/ dir left over from a pre-migration build, so
+# `COPY .diarykg/` would otherwise bake a stale multi-GB index into the image.
+**/lancedb
+
+# Snapshots (`diarykg build --snapshot`) — provenance history, not runtime data.
+.diarykg/snapshots
+
+# ---------------------------------------------------------------------------
+# Repo content the image never reads
+# ---------------------------------------------------------------------------
+# Source corpus + generated intermediates. The image is served from the built
+# index; the 13 MB of raw/enriched text behind it is a build-time input only.
+data/
+
+assets/
+docs/
+analysis/
+reports/
+config/
+scripts/
+tests/
+
+# ---------------------------------------------------------------------------
+# Repo cruft
+# ---------------------------------------------------------------------------
+.git/
+.github/
+.venv/
+.venv-image/
+**/__pycache__/
+**/*.pyc
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+dist/
+build/
+*.egg-info/
+
+# Local secrets / env — must never reach a layer
+docker/.env
+.env

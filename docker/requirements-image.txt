@@ -1,3 +1,14 @@
+# Isolated dependency set for the host-side FLUX image server (`make image-server`).
+#
+# Kept OUT of pyproject.toml on purpose: mflux pins a transformers range that
+# conflicts with the doc-kg / diary-kg stack, so installing it into the project
+# venv breaks the index build. `make image-server` therefore builds a separate
+# .venv-image from this file and runs docker/image_server.py there.
+#
+# Apple Silicon only — mflux is built on MLX. The container never installs this;
+# in-container image generation goes out over HTTP to IMAGE_ENDPOINT.
+#
+# Mirrors gutenberg_kg/docker/requirements-image.txt.
 fastapi>=0.116.0
 uvicorn>=0.30.0
 pydantic>=2.8.0

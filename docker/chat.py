@@ -18,18 +18,16 @@ from __future__ import annotations
 import html
 import io
 import os
-import sys
 from pathlib import Path
 
 import httpx
 import streamlit as st
-
-sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
-
 from kg_utils.worker import WorkerClient, WorkerError
 
-_IN_DOCKER = os.path.exists("/.dockerenv")
-_HOST = "host.docker.internal" if _IN_DOCKER else "localhost"
+# /.dockerenv only exists under Docker; Apple's `container` runtime sets no
+# marker file, so the image also sets PEPYS_IN_CONTAINER=1 explicitly.
+_IN_CONTAINER = os.path.exists("/.dockerenv") or bool(os.environ.get("PEPYS_IN_CONTAINER"))
+_HOST = "host.docker.internal" if _IN_CONTAINER else "localhost"
 
 _DEFAULT_WORKER = os.environ.get("KGRAG_ENDPOINT", "http://localhost:8000")
 
@@ -38,6 +36,34 @@ _SYNTH_PROVIDERS: dict[str, str] = {
     "Ollama": "ollama",
     "OpenAI": "openai",
 }
+
+# Synthesis models to hide from the dropdown. Reasoning models like Agents-A1
+# emit their chain-of-thought as plain prose in the response body — not as
+# strippable `<think>` tags, and unaffected by the `enable_thinking:false` flag —
+# so on RAG prompts the answer truncates inside the thinking and the UI shows raw
+# reasoning instead of an answer. Also excludes non-chat utilities (document
+# converters, embedding models); an embedding model picked here fails the request
+# outright. Matched case-insensitively as substrings.
+# Kept identical to gutenberg_kg's list — both UIs read the same oMLX/Ollama
+# model catalogue, so a model that is unusable there is unusable here.
+_MODEL_BLOCKLIST: tuple[str, ...] = (
+    "agents-a1",  # reasoning agent — unstrippable "Thinking Process:" prose
+    "deepseek-r1",  # R1 reasoning model
+    "gpt-oss",  # reasoning model (harmony channels leak into content)
+    "markitdown",  # document-to-markdown converter, not a chat model
+    "embed",  # embedding models (nomic-embed, mxbai-embed, qwen3-embedding)
+)
+
+
+def _is_synth_model(model_id: str) -> bool:
+    """Return ``True`` if a model id is usable for RAG synthesis (not blocklisted).
+
+    :param model_id: Model id reported by the backend.
+    :returns: ``False`` for reasoning/non-chat models unsuited to concise RAG.
+    """
+    lid = model_id.lower()
+    return not any(pat in lid for pat in _MODEL_BLOCKLIST)
+
 
 _RESOLUTION_LABELS: dict[str, str] = {
     "Preview": "Preview  (768 × 512)",
@@ -238,8 +264,39 @@ def _query_worker(
 
 @st.cache_data(ttl=60, show_spinner=False)
 def _fetch_models(worker_url: str, secret: str, backend: str = "") -> tuple[list[str], str]:
-    """Ask the worker which synthesis models are served. Returns (model_ids, default)."""
-    return WorkerClient(worker_url, secret).list_models(backend=backend)
+    """Ask the worker which synthesis models are served. Returns (model_ids, default).
+
+    Reasoning and non-chat models (see ``_MODEL_BLOCKLIST``) are filtered out,
+    including from the backend's reported default — picking one of those
+    produces raw chain-of-thought, or an outright failure for an embedding model.
+    """
+    models, default = WorkerClient(worker_url, secret).list_models(backend=backend)
+    models = [m for m in models if _is_synth_model(m)]
+    if default and not _is_synth_model(default):
+        default = models[0] if models else ""
+    return models, default
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _fetch_stats(worker_url: str, secret: str) -> dict:
+    """Fetch live index totals from the worker's ``stats`` op (cached 5 min).
+
+    :param worker_url: Base URL of the KGRAG worker.
+    :param secret: Shared secret for the worker (if configured).
+    :returns: The worker's stats dict, or ``{}`` if the worker is unreachable so
+              the sidebar degrades gracefully before the worker is up.
+    """
+    inp: dict = {"op": "stats"}
+    if secret:
+        inp["secret"] = secret
+    try:
+        resp = httpx.post(f"{worker_url.rstrip('/')}/runsync", json={"input": inp}, timeout=10.0)
+        resp.raise_for_status()
+        payload = resp.json()
+    except httpx.HTTPError:
+        return {}
+    out = payload.get("output", payload)
+    return out if isinstance(out, dict) and "error" not in out else {}
 
 
 # ---------------------------------------------------------------------------
@@ -274,8 +331,24 @@ def _init_state() -> None:
 
 
 def _render_sidebar() -> dict:
+    secret = os.environ.get("HANDLER_SECRET", "")
     st.sidebar.title("📔 Pepys Diary")
-    st.sidebar.markdown("Samuel Pepys · London · 1660–1669  \n3,355 entries · 7,282 indexed chunks")
+    # Counts come from the worker's `stats` op rather than being written into
+    # the string. The hardcoded pair that used to live here ("3,355 entries ·
+    # 7,282 indexed chunks") already disagreed with README.md's own table
+    # (7,285) and would silently go stale on the next `make build-index`.
+    stats = _fetch_stats(_DEFAULT_WORKER, secret)
+    if stats:
+        model_short = (stats.get("embed_model") or "").rsplit("/", 1)[-1]
+        st.sidebar.markdown(
+            f"Samuel Pepys · London · 1660–1669  \n"
+            f"{stats.get('entries', 0):,} entries · {stats.get('chunks', 0):,} indexed chunks  \n"
+            f"{model_short}"
+        )
+    else:
+        st.sidebar.markdown(
+            "Samuel Pepys · London · 1660–1669  \n_corpus stats unavailable — worker offline_"
+        )
     st.sidebar.markdown("---")
 
     st.sidebar.subheader("⚙️ Search")
@@ -322,7 +395,6 @@ def _render_sidebar() -> dict:
         )
         backend = _SYNTH_PROVIDERS[provider_label]
 
-        secret = os.environ.get("HANDLER_SECRET", "")
         with st.sidebar:
             with st.spinner("Fetching models…"):
                 models, default = _fetch_models(_DEFAULT_WORKER, secret, backend)
@@ -411,7 +483,7 @@ def _render_sidebar() -> dict:
 
     return {
         "worker_url": _DEFAULT_WORKER,
-        "secret": os.environ.get("HANDLER_SECRET", ""),
+        "secret": secret,
         "k": k,
         "min_score": min_score,
         "semantic_floor": semantic_floor,

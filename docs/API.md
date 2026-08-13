@@ -19,7 +19,7 @@ The worker exposes the RunPod serverless API on port 8000 once it is running
 {
   "input": {
     "query":          "string  — required",
-    "corpus":         "pepys | all  (default: all)",
+    "corpus":         "diary | all  (default: all)",
     "k":              8,
     "min_score":      0.0,
     "semantic_floor": 0.0,
@@ -31,7 +31,7 @@ The worker exposes the RunPod serverless API on port 8000 once it is running
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `query` | string | — | Natural-language question (required) |
-| `corpus` | string | `all` | `pepys` to scope to the diary, `all` for every registered KG |
+| `corpus` | string | `all` | `diary` to scope to the diary, `all` for every registered KG. Any other value is rejected with `{"error": "unknown corpus ..."}` |
 | `k` | int | 8 | Number of passages to return |
 | `min_score` | float | 0.0 | Drop individual hits below this relevance score |
 | `semantic_floor` | float | 0.0 | Discard the whole result if the best hit is below this |
@@ -43,7 +43,7 @@ The worker exposes the RunPod serverless API on port 8000 once it is running
 ```json
 {
   "query": "Great Fire of London",
-  "corpus": "pepys",
+  "corpus": "diary",
   "total_hits": 8,
   "hits": [
     {
@@ -67,13 +67,50 @@ Plain semantic search:
 ```bash
 curl -s -X POST http://localhost:8000/runsync \
   -H "Content-Type: application/json" \
-  -d '{"input":{"query":"Great Fire of London","corpus":"pepys","k":5}}' | jq .
+  -d '{"input":{"query":"Great Fire of London","corpus":"diary","k":5}}' | jq .
 ```
 
 Makefile shorthand:
 
 ```bash
 make query QUERY="Great Fire of London"
+```
+
+---
+
+## Operations
+
+Besides search, the worker accepts an `op` field instead of a `query`. These
+back the chat UI's sidebar and its "Render response" button, and are the same
+set gutenberg_kg's worker serves.
+
+| `op` | Returns |
+|---|---|
+| `stats` | `entries`, `chunks`, `nodes`, `edges`, `vectors`, `embed_model` |
+| `models` | `models` (list of ids) and `default` for the active synthesis backend |
+| `rewrite` | `prompt` — a passage (`text`) rewritten into an image-generation prompt |
+| `imagine` | `image_b64`, `prompt`, `aspect_ratio`, `image_model`, `image_backend` |
+
+`HANDLER_SECRET`, when set, is required for these exactly as it is for a search.
+
+Live index totals — the numbers in this repo's tables can only ever describe the
+build they were written for, so read them from the running worker instead:
+
+```bash
+curl -s -X POST http://localhost:8000/runsync \
+  -H "Content-Type: application/json" \
+  -d '{"input":{"op":"stats"}}' | jq .
+```
+
+```json
+{
+  "entries": 3355,
+  "chunks": 7282,
+  "nodes": 41517,
+  "edges": 333679,
+  "vectors": 7282,
+  "embed_model": "BAAI/bge-small-en-v1.5"
+}
 ```
 
 ---
