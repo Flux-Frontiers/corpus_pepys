@@ -48,39 +48,49 @@ built with [DiaryKG](https://github.com/Flux-Frontiers/diary_kg) and served via 
 
 Query nine years of 17th-century London — the Great Plague, the Great Fire, the
 Restoration court — with natural language, locally, in under a second.
-No index to build. No model to download. Just pull and run.
+No index to build. No model to download. Just pull and go.
 
 ---
 
 ## Quick start
 
-### 1. Pull and run
+`make` drives everything — clone the repo, then run these from its root.
+(Requires Docker; add `RUNTIME=apple` to any target to use Apple's native
+`container` CLI instead. See `make help` for the full target list.)
+
+### 1. Pull the image
 
 ```bash
-docker pull egsuchanek/corpus-pepys:latest
-docker run -p 8000:8000 egsuchanek/corpus-pepys:latest
+git clone https://github.com/Flux-Frontiers/corpus_pepys.git
+cd corpus_pepys
+make pull
 ```
 
-Or, with the repo cloned, simply:
+The diary index and embedding model are baked into the published image —
+`make pull` fetches it from Docker Hub, no local build or model download needed.
+(A plain `docker pull` + `docker run` won't work on its own: the worker needs
+the `--rp_serve_api` flags that `make`/`docker compose` supply.)
+
+### 2. Start it up
 
 ```bash
-make run
+make up
 ```
 
-The worker starts on `http://localhost:8000`. The diary index is baked into the
-image — no volumes, no model download, no setup.
+This starts the KGRAG worker on `http://localhost:8000` and the **Pepys chat
+app** on `http://localhost:8501` in the background. Open the chat app in your
+browser and ask questions in plain English — no command line required.
 
 Runs anywhere Docker does — Linux, macOS, Windows. No Apple hardware required.
 
-### 2. Open the chat app
+When you're done:
 
 ```bash
-make chat
+make down
 ```
 
-This opens the **Pepys chat app** in your browser at `http://localhost:8501` — the
-easiest way to explore the diary. Ask questions in plain English and read the entries
-that answer them; no command line required.
+Just the worker, without the chat UI: `make run` (stop it the same way, with
+`make down`). Follow its logs with `make logs`.
 
 Or bring up worker and chat together:
 

@@ -34,11 +34,13 @@ they run on the host and talk to `localhost`, so they work unchanged either way.
 
 - **Memory and CPU are per-container VM flags.** Each container is its own VM,
   so memory is a hard upper bound rather than a share of one big Docker Desktop
-  VM, and the CLI defaults are far too small for the worker (torch + embedder +
-  41K-node graph + 41K vectors). The Make targets pass `8g`/6 CPUs for the
-  worker and `4g` for chat. Override per-invocation:
-  `make run RUNTIME=apple WORKER_MEM=12g`. Allocation is lazy, so `8g` does not
-  pin 8 GB of RAM.
+  VM. Measured via `container stats` with torch + embedder + the full
+  41K-node graph loaded: the worker idles at ~950 MiB and peaks at ~1.02 GiB
+  under 8-way concurrent `k=50` queries; chat idles at ~100 MiB. The Make
+  targets pass `2g`/6 CPUs for the worker and `512m` for chat — roughly 2x and
+  5x headroom over those measured peaks. Override per-invocation:
+  `make run RUNTIME=apple WORKER_MEM=4g`. Allocation is lazy, so these do not
+  pin that much RAM up front.
 
 - **Ports are published to the host.** `container` gained Docker-style
   `--publish` in CLI v1.1.0, so `8000` and `8501` reach `localhost` exactly as

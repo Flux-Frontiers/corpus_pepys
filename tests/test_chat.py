@@ -130,7 +130,7 @@ class TestFetchStats:
         post = self._post({"output": {}})
         with patch.object(httpx, "post", post):
             chat._fetch_stats("http://w:8000", "s3cret")
-        assert post.sent["input"]["secret"] == "s3cret"
+        assert post.sent["input"]["secret"] == "s3cret"  # pragma: allowlist secret
 
         post = self._post({"output": {}})
         with patch.object(httpx, "post", post):
