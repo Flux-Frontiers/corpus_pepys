@@ -821,21 +821,21 @@ word-list = ["pyahocorasick"]
 
 [[package]]
 name = "diary-kg"
-version = "0.96.0"
+version = "0.97.0"
 description = "A knowledge graph builder and semantic search engine for diaries and journals"
 optional = true
 python-versions = "<3.14,>=3.12"
 groups = ["main"]
 markers = "extra == \"build\""
 files = [
-    {file = "diary_kg-0.96.0-py3-none-any.whl", hash = "sha256:ea213e23c412ae3eaf1446011fe949cc0e21b3dfafbfe35744b252b5dac1eb65"},
-    {file = "diary_kg-0.96.0.tar.gz", hash = "sha256:a2d4e05eaa747a10a58919eea621ddb69c7ae1752b3390ed8c93735710662f5d"},
+    {file = "diary_kg-0.97.0-py3-none-any.whl", hash = "sha256:398bad39475e2423f8d5c48b76c32be21516fb7732b08ef605981c8e3132e700"},
+    {file = "diary_kg-0.97.0.tar.gz", hash = "sha256:f7712acaee94f8aaa449844dfe079e781cda2108b0a31d6281b52c9be6d2e00c"},
 ]
 
 [package.dependencies]
 click = ">=8.1.0,<9"
-doc-kg = ">=0.20.0"
-kgmodule-utils = ">=0.9.0"
+doc-kg = ">=0.21.2"
+kgmodule-utils = ">=0.13.2"
 mcp = ">=1.0.0,<2"
 numpy = ">=1.24.0"
 pandas = ">=2.0.0"
@@ -844,8 +844,6 @@ sentence-transformers = ">=5.4.1"
 spacy = ">=3.8.11,<4"
 
 [package.extras]
-all = ["PyQt5 (>=5.15.0)", "detect-secrets (>=1.5.0)", "markdown (>=3.6)", "param (>=2.0.0)", "pdoc (>=14.0.0)", "pillow (>=10.0.0)", "plotly (>=5.14.0)", "pre-commit (>=4.5.1)", "pylint (>=4.0.5)", "pytest (>=8.0.0)", "pytest-cov (>=5.0.0)", "pyvis (>=0.3.2)", "pyvista (>=0.44.0)", "pyvistaqt (>=0.11.0)", "ruff (>=0.4.0)", "streamlit (>=1.35.0)", "trame-vtk (>=2.0.0)", "ty (>=0.0.44)", "vtracer (>=0.6.15)"]
-dev = ["detect-secrets (>=1.5.0)", "pdoc (>=14.0.0)", "pillow (>=10.0.0)", "pre-commit (>=4.5.1)", "pylint (>=4.0.5)", "pytest (>=8.0.0)", "pytest-cov (>=5.0.0)", "ruff (>=0.4.0)", "ty (>=0.0.44)", "vtracer (>=0.6.15)"]
 viz = ["plotly (>=5.14.0)", "pyvis (>=0.3.2)", "streamlit (>=1.35.0)"]
 viz3d = ["PyQt5 (>=5.15.0)", "markdown (>=3.6)", "param (>=2.0.0)", "pyvista (>=0.44.0)", "pyvistaqt (>=0.11.0)", "trame-vtk (>=2.0.0)"]
 
@@ -1465,14 +1463,14 @@ referencing = ">=0.31.0"
 
 [[package]]
 name = "kgmodule-utils"
-version = "0.13.1"
+version = "0.13.2"
 description = "Shared types, graph store, semantic index, and pipeline base for the KGModule SDK"
 optional = false
 python-versions = "<3.14,>=3.12"
 groups = ["main"]
 files = [
-    {file = "kgmodule_utils-0.13.1-py3-none-any.whl", hash = "sha256:890eae1b0adb1b930ba41d6d33111d786487bdf07ec3e3061cdaecd023b507a9"},
-    {file = "kgmodule_utils-0.13.1.tar.gz", hash = "sha256:e82623f44015a6dcfbb3de7ca44cde1002e304d4432a5492341dd871fe81dac7"},
+    {file = "kgmodule_utils-0.13.2-py3-none-any.whl", hash = "sha256:379f6a6f47ed3523375a53895fb310830272b6782e057492c4b2b089f5464890"},
+    {file = "kgmodule_utils-0.13.2.tar.gz", hash = "sha256:43d6797f7dec305ee841cd997f4ea0e55de7d04546e15ae6199865bbdf58ea86"},
 ]
 
 [package.dependencies]
@@ -1483,8 +1481,8 @@ pillow = {version = ">=10.0.0", optional = true, markers = "extra == \"synthesis
 rich = {version = ">=13.0.0,<15.0.0", optional = true, markers = "extra == \"semantic\""}
 sentence-transformers = {version = ">=5.4.1", optional = true, markers = "extra == \"semantic\""}
 sqlite-vec = [
-    {version = "0.1.9", optional = true, markers = "extra == \"semantic\""},
     {version = "0.1.9", optional = true, markers = "extra == \"sqlite-vec\""},
+    {version = "0.1.9", optional = true, markers = "extra == \"semantic\""},
 ]
 torch = {version = ">=2.5.1", optional = true, markers = "extra == \"semantic\""}
 transformers = {version = ">=5.5.0,<6", optional = true, markers = "extra == \"semantic\""}
@@ -4890,4 +4888,4 @@ build = ["diary-kg", "doc-kg"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "4606deb5316138d1cdcf0b0722f73c49497feb9acd7b342978bf69cfdfac1042"
+content-hash = "783f8cc2ed9c88c08ecb38bf856dc39874054c9878354e26fa864dcc30f54857"
