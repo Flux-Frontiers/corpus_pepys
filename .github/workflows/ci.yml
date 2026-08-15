@@ -13,7 +13,11 @@ permissions:
 jobs:
   # ---------------------------------------------------------------------------
   # Lint & type-check
-  # Full poetry install is skipped — ruff and ty are installed directly.
+  # Installs the `dev` Poetry group rather than pip-installing ruff and ty
+  # directly. That is what makes CI honour the floors this repo declares: the
+  # old `pip install "ruff>=0.4.0"` was unbounded, so CI could resolve a ruff
+  # newer than the `<0.16` cap in pyproject.toml and disagree with every
+  # contributor's `make lint` about formatting. Matches the rest of the fleet.
   # ---------------------------------------------------------------------------
   lint:
     name: Lint & type-check
@@ -26,20 +30,26 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+
       - name: Install lint tools
-        run: pip install "ruff>=0.4.0" "ty>=0.0.41"
+        run: poetry install --only dev --no-interaction
 
       # Scope matches `make lint` plus tests/. CI previously checked docker/
       # only, so a lint error in scripts/ or tests/ passed CI and then failed
       # on the contributor's machine at `make lint` / pre-commit.
       - name: ruff — check
-        run: ruff check docker/ scripts/ tests/
+        run: poetry run ruff check docker/ scripts/ tests/
 
       - name: ruff — format
-        run: ruff format --check docker/ scripts/ tests/
+        run: poetry run ruff format --check docker/ scripts/ tests/
 
       - name: ty
-        run: ty check docker/
+        run: poetry run ty check docker/
 
   # ---------------------------------------------------------------------------
   # Tests

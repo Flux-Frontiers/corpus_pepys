@@ -1,4 +1,4 @@
-.PHONY: help setup install install-dev install-model check-pins build-corpus build-index reindex build build-image build-all run stop down logs image-server sdxl-server sdxl-fetch image-server-optional chat chat-container up query serve-llm test lint clean
+.PHONY: help setup install install-dev install-model check-pins build-corpus build-index reindex build build-image build-all pull run stop down logs image-server sdxl-server sdxl-fetch image-server-optional chat chat-container up query serve-llm test lint clean
 
 # Bare `make` prints help rather than installing: a cold `make install` pulls
 # torch + the spaCy stack, which is not what a stray keystroke should trigger.
@@ -86,14 +86,16 @@ endif
 
 # Apple `container` settings (RUNTIME=apple only). Each container is its own
 # VM — memory is an explicit upper bound, not shared with the host like Docker
-# Desktop's single big VM, and the defaults are far too small for the worker
-# (torch + embedder + 41K-node graph + 41K vectors). Lazily allocated, so 8g
-# does not pin 8 GB of RAM.
+# Desktop's single big VM. Lazily allocated, so these do not pin that much RAM
+# up front. Measured via `container stats` with torch + embedder + the full
+# 41K-node graph loaded: worker idles at ~950 MiB and peaks at ~1.02 GiB under
+# 8-way concurrent k=50 queries; chat idles at ~100 MiB. Defaults below give
+# ~2x headroom over the observed worker peak and ~5x over chat.
 WORKER_NAME  = pepys-worker
 CHAT_NAME    = pepys-chat
-WORKER_MEM  ?= 8g
+WORKER_MEM  ?= 2g
 WORKER_CPUS ?= 6
-CHAT_MEM    ?= 4g
+CHAT_MEM    ?= 512m
 
 # Host reachability from containers. Apple's `container` supports Docker-style
 # port publishing (`--publish`) as of CLI v1.1.0, so worker and chat ports are
@@ -137,6 +139,7 @@ help:
 	@echo "  make check-pins     Verify lock/Dockerfile/compose KG pins agree"
 	@echo "  make build          Build the image for the selected runtime"
 	@echo "  make build-all      Build for every runtime installed on this machine"
+	@echo "  make pull           Pull the published image from Docker Hub (no local build needed)"
 	@echo "  make run            Start the KGRAG service on http://localhost:8000"
 	@echo "  make up             Worker + chat UI (+ image server where supported)"
 	@echo "  make stop           Stop the service"
@@ -334,7 +337,7 @@ build-all:
 image-server-optional:
 	@echo "Starting $(IMAGE_BACKEND) image server in background ..."
 	-@$(MAKE) --no-print-directory $(IMAGE_TARGET) || \
-		echo "WARNING: the image server did not start. Worker and chat are up; only the chat UI's 'Render response' button is affected." 
+		echo "WARNING: the image server did not start. Worker and chat are up; only the chat UI's 'Render response' button is affected."
 
 ifeq ($(RUNTIME),apple)
 
@@ -465,6 +468,15 @@ build: check-pins setup
 	@test -d .diarykg || (echo "ERROR: .diarykg/ not found — run 'make build-index' first" && exit 1)
 	docker build -f docker/Dockerfile -t $(IMAGE_NAME):latest .
 	@echo "Done. Image built: $(IMAGE_NAME):latest  (runtime: docker)"
+
+# docker-compose.yml refers to the image as $(IMAGE_NAME):latest (no registry
+# prefix), so a bare `docker pull` of the Hub image leaves it invisible to
+# `make run`/`make up` — compose would instead try to build it from source
+# (and fail without a local .diarykg/). Retag it locally to close that gap.
+pull:
+	docker pull egsuchanek/corpus-pepys:latest
+	docker tag egsuchanek/corpus-pepys:latest $(IMAGE_NAME):latest
+	@echo "Tagged as $(IMAGE_NAME):latest — ready for 'make run' / 'make up'."
 
 run:
 	$(COMPOSE) up -d pepys-worker

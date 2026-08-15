@@ -5,7 +5,7 @@ diary. This document is for developers who want to call the service directly ove
 HTTP — for scripting, integration, or building their own front end.
 
 The worker exposes the RunPod serverless API on port 8000 once it is running
-(`make run` or `docker run -p 8000:8000 egsuchanek/corpus-pepys:latest`).
+(`make pull && make run` — see the [Quick start](../README.md#quick-start)).
 
 ---
 

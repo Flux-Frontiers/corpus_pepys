@@ -37,6 +37,10 @@ third: porting `gutenberg_kg`'s SDXL-Lightning image server, so image generation
 works on those hosts instead of merely being skipped.
 
 ### Added
+- **`make pull`** — fetches the published image from Docker Hub and retags it
+  as `corpus-pepys:latest`, the name `docker-compose.yml` expects. Without
+  this, a bare `docker pull` left the image invisible to `make run`/`make up`,
+  which would instead try (and fail) to build from source.
 
 - **`docker/sdxl_server.py` (new)** — an SDXL-Lightning image server on `:8091`,
   ported from `gutenberg_kg`, exposing the identical OpenAI-style
@@ -110,6 +114,14 @@ works on those hosts instead of merely being skipped.
   degradation, the suite goes 57 → 91 tests.
 
 ### Changed
+- **README quick start** now walks through `git clone` → `make pull` →
+  `make up` → `make down` instead of a standalone `docker pull` +
+  `docker run`. `docs/API.md` updated to match.
+- **Apple `container` runtime memory defaults right-sized**: `WORKER_MEM`
+  8g → 2g, `CHAT_MEM` 4g → 512m, based on `container stats` measured under
+  idle and 8-way concurrent `k=50` query load (worker peaks ~1.02 GiB, chat
+  ~100 MiB) rather than the previous unmeasured guess. `docs/APPLE_CONTAINERS.md`
+  updated with the measurement.
 
 - **The synthesis docs lead with Ollama rather than oMLX.** oMLX is
   Apple-Silicon-only, and `docs/API.md`, `docs/USER_GUIDE.md` and
@@ -177,6 +189,11 @@ works on those hosts instead of merely being skipped.
   tracked.
 
 ### Fixed
+- **README/API.md quick start never actually worked.** `docker run -p
+  8000:8000 egsuchanek/corpus-pepys:latest` starts the image's default `CMD`
+  (`python -u handler.py`), which runs RunPod's serverless poll loop, not an
+  HTTP server — the `--rp_serve_api --rp_api_host 0.0.0.0` flags that make it
+  serve `:8000` are only passed by `docker compose` (i.e. `make run`/`make up`).
 
 - **`make up` failed on any host without Apple Silicon.** It unconditionally ran
   `make image-server`, which builds `.venv-image` from
