@@ -1,26 +1,32 @@
 # pyproject.toml — corpus_pepys project configuration (PEP 621)
 #
 # Author: Eric G. Suchanek, PhD
-# Last Revision: 2026-08-03
 #
 # Build system : Poetry 2.x with PEP 621 [project] table
-#
-# Quick install (pip)
-# -------------------
-#   pip install -e ".[dev]"     core + dev tools
-#   pip install -e "."          core runtime only
+# `package-mode = false` — this repo is a service and a corpus, not a wheel.
+# There is nothing to `pip install -e`; use poetry.
 #
 # Quick install (poetry)
 # ----------------------
-#   poetry install --all-extras
-#   poetry install --extras "dev"
-#   poetry install
+#   poetry install                        service runtime only
+#   poetry install --extras build         + the corpus/index build toolchain
+#   poetry install --extras build --with dev    full maintainer environment
 #
-# First-time setup
-# ----------------
-#   python -m venv .venv
-#   source .venv/bin/activate
-#   pip install -e ".[dev]"
+# `dev` is a Poetry group, not an extra — `--extras dev` does not exist.
+#
+# Running the gate needs `--extras build`
+# ---------------------------------------
+# `pre-commit run --all-files` type-checks docker/ as well as src/, and
+# docker/sdxl_server.py imports torch, which only arrives with the `build`
+# extra. Without it `ty` fails on `torch.dtype` with no obvious connection to
+# what you changed:
+#
+#   poetry install --extras build --with dev
+#   env -u VIRTUAL_ENV -u POETRY_ACTIVE poetry run pre-commit run --all-files
+#
+# `poetry install --sync` without `--extras build` prunes torch and can leave
+# an empty `torch/` directory behind, so `import torch` then succeeds with
+# every attribute missing — a stranger failure than a plain ImportError.
 #
 # Build the corpus index
 # ----------------------
@@ -80,7 +86,7 @@ requires-python = ">=3.12,<3.14"
 dependencies = [
     "fastapi>=0.116.0",
     "httpx>=0.27.0",
-    "kgmodule-utils[synthesis,sqlite-vec]>=0.13.1",
+    "kgmodule-utils[synthesis,sqlite-vec]>=0.13.2",
     "openai>=1.95.0",
     "pillow>=11.0.0",
     "pydantic>=2.8.0",
@@ -105,12 +111,15 @@ dependencies = [
 # reads the pre-built .diarykg/ index. Kept out of the runtime deps because
 # diary-kg drags in the full spaCy/thinc NLP stack.
 #
-# These floors MUST stay in step with the pins in docker/Dockerfile: the index
-# is produced here and consumed there, and doc-kg >=0.18.2 changed the vector
-# store layout (LanceDB retired → file-shaped vectors.sqlite). Building with a
-# version older than the container's emits an index it cannot open.
+# This project is canonical; docker/Dockerfile follows it. The index is
+# produced here and consumed there, and doc-kg >=0.18.2 changed the vector
+# store layout (LanceDB retired → file-shaped vectors.sqlite), so building
+# with a version older than the container's emits an index it cannot open.
+# When a floor moves here, move the matching ARG in docker/Dockerfile in the
+# same commit — the container pins with `==`, so it cannot drift upward on
+# its own, and a yanked release would not route around it.
 build = [
-    "diary-kg>=0.96.0",
+    "diary-kg>=0.97.0",
     "doc-kg>=0.21.2",
 ]
 
