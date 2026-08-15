@@ -7,6 +7,31 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- **`kgmodule-utils` raised to 0.11.0 in both places it is pinned** — the
+  `pyproject.toml` floor and the `docker/Dockerfile` ARG. The fleet published
+  0.11.0 (the shared 3-D layout engine extracted out of `pycode_kg`); this repo
+  was the last on 0.10.0.
+
+  Moving both together is load-bearing here rather than tidiness. This project
+  is `package-mode = false` with no `pip install .` step, so unlike
+  `gutenberg_kg` there is no second resolve to reconcile the two: the ARG is the
+  last word on what the served image installs. Raising only the floor would have
+  left the container on 0.10.0 while the index builder ran 0.11.0 — an index
+  written by one version and opened by another, which is the split
+  `scripts/check_pins.py` exists to catch.
+
+  Nothing here uses the 0.11.0 additions, and the API this repo does use is
+  unchanged: the four `kg_utils.synthesis` factories, `WorkerClient` /
+  `WorkerError` / `handle_aux_ops`, and `SqliteVecBackend` are all still present.
+  The package set is identical across the bump — 155 packages before and after,
+  none added or removed. The only other lock movement is upstream metadata: the
+  `sqlite-vec` marker entries reorder, and a `viz3d = ["numpy (>=1.24.0)"]` extra
+  appears. Neither installs anything, since this repo requests
+  `[synthesis,sqlite-vec]`.
+
+
 ### Fixed
 
 - **`tests/test_sdxl_server.py` tested the wrong thing.** Its import-deferral

@@ -164,6 +164,15 @@ with the doc-kg stack. So it runs on the host in an isolated `.venv-image`
 (`make image-server`), and the container reaches it over HTTP at
 `IMAGE_ENDPOINT`. `image_gen.py` is deliberately **not** copied into the image.
 
+**Both pin sites move together.** `pyproject.toml`'s floor and the Dockerfile
+ARG are not belt-and-braces here. This project is `package-mode = false` with no
+`pip install .` step, so nothing re-resolves the ARG against the floor — the ARG
+is the last word on what the served image installs. Raising only the floor would
+leave the container a version behind the index builder. (`gutenberg_kg` is the
+opposite: its `pip install .` silently upgrades past a low ARG, which is why its
+`check_pins.py` carries a floor check and this one does not — here an ARG below
+the floor already fails the exact lock-vs-ARG comparison.)
+
 **KG pins move as a set.** `kg-rag`, `kgmodule-utils`, `doc-kg` and `diary-kg`
 are cross-pinned and `==`-pinned in the Dockerfile, so a stale one is a hard
 build failure rather than a silent upgrade. `make check-pins` verifies the lock
@@ -191,10 +200,10 @@ compose, the unfiltered synthesis-model dropdown, hardcoded sidebar counts, the
 `streamlit>=1.35` floor, container detection, and `HANDLER_SECRET` not reaching
 the chat service.
 
-Two defects this audit found in `gutenberg_kg` itself are written up in that
-repo's `HANDOFF-corpus-pepys-audit.md`: its chat service has the same
-`HANDLER_SECRET` gap, and its Dockerfile pins `kgmodule-utils` below its own
-declared floor.
+Defects this audit found in `gutenberg_kg` itself — a `HANDLER_SECRET` gap in
+its chat service, and a Dockerfile pinning `kgmodule-utils` below its own
+declared floor — are written up in that repo's
+`HANDOFF-corpus-pepys-audit.md`. Both are now fixed there.
 
 ---
 
@@ -213,9 +222,6 @@ declared floor.
 
 ## What's next
 
-- Decide whether to move `kgmodule-utils` to 0.11.0 to match the rest of the
-  fleet. Nothing here needs the 0.11.0 additions (viz3d layout primitives), and
-  the four KG packages move as a set, so this is a deliberate bump, not a drift fix.
 - Consider adding a `diarykg mcp` service to the compose stack so the corpus is
   queryable from Claude Code over MCP.
 - Richer synthesis prompts — the RAG system prompt is deliberately terse; longer
