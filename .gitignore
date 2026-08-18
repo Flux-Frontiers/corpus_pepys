@@ -68,3 +68,9 @@ docs/pepys_society_email.md
 docs/pepys_society_email.txt
 # Scratch commit message drafted by the changelog-commit workflow
 commit.txt
+
+# AgentKG local store -- nothing under it is ever tracked.
+# AgentKG records local agent interactions, not project state; it is global
+# user context rather than anything this repo should publish. Every other
+# fleet repo carries this rule -- see kgrag_priv/docs/SNAPSHOT_STRATEGY.md.
+**/.agentkg/
