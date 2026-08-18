@@ -1,4 +1,4 @@
-.PHONY: help setup install install-dev install-model check-pins bump-pins build-corpus build-index reindex build build-image build-all pull run stop down logs image-server sdxl-server sdxl-fetch image-server-optional chat chat-container up query serve-llm test lint clean
+.PHONY: help setup install install-dev reinstall-env install-model check-pins bump-pins build-corpus build-index reindex build build-image build-all rebuild rebuild-all prune pull run stop down logs image-server sdxl-server sdxl-fetch image-server-optional chat chat-container up query serve-llm test lint clean
 
 # Bare `make` prints help rather than installing: a cold `make install` pulls
 # torch + the spaCy stack, which is not what a stray keystroke should trigger.
@@ -12,6 +12,11 @@ OMLX_PORT     ?= 8080
 COMPOSE       = docker compose -f docker/docker-compose.yml
 IMAGE_SERVER  = http://localhost:8090
 SDXL_SERVER   = http://localhost:8091
+
+# Extra flags spliced into both build recipes below. Empty for a normal
+# `make build` (layer cache used); `make rebuild`/`rebuild-all` set this to
+# --no-cache so a stale cached layer can't hide a change.
+BUILD_FLAGS ?=
 
 # ------------------------------------------------------------------
 # Container runtime — RUNTIME=docker (default) or RUNTIME=apple.
@@ -133,6 +138,7 @@ help:
 	@echo ""
 	@echo "  make install        Setup: runtime + NLP build toolchain + spaCy model"
 	@echo "  make install-dev    As above, plus dev tools (pytest, ruff, pre-commit)"
+	@echo "  make reinstall-env  Nuke the venv, re-lock, and reinstall from scratch"
 	@echo "  make build-corpus   Transform raw text → enriched corpus (pepys_clean.txt → enriched)"
 	@echo "  make build-index    Full build: ingest + index from $(CORPUS_SOURCE)"
 	@echo "  make reindex        Re-index only (skip ingest, use existing corpus .md files)"
@@ -140,6 +146,9 @@ help:
 	@echo "  make bump-pins      Move every KG pin to the latest PyPI release, then re-lock"
 	@echo "  make build          Build the image for the selected runtime"
 	@echo "  make build-all      Build for every runtime installed on this machine"
+	@echo "  make rebuild        Force a fresh build (--no-cache) for the selected runtime"
+	@echo "  make rebuild-all    Force a fresh build (--no-cache) for every runtime installed"
+	@echo "  make prune          Remove dangling images / stopped containers / build cache"
 	@echo "  make pull           Pull the published image from Docker Hub (no local build needed)"
 	@echo "  make run            Start the KGRAG service on http://localhost:8000"
 	@echo "  make up             Worker + chat UI (+ image server where supported)"
@@ -188,6 +197,15 @@ install-dev:
 	poetry install --all-extras
 	@$(MAKE) --no-print-directory install-model
 	@echo "Done. Dev environment ready."
+
+# Nuke the venv and rebuild it from scratch: fresh lock, build + dev tooling.
+# For when the env is in a state a plain `install-dev` won't fix (stale
+# native deps, a broken interpreter link, etc).
+reinstall-env:
+	poetry env remove --all
+	poetry lock
+	poetry install --extras build --with dev
+	@echo "Done. Environment reinstalled."
 
 # The index is built here by the [build] extra and read by the container. Those
 # two must agree — doc-kg >=0.18.2 changed the vector store layout, so a builder
@@ -339,6 +357,41 @@ build-all:
 		echo "==> Skipping Apple container — not installed."; \
 	fi
 
+# Force a fresh image under the selected runtime, ignoring the layer cache —
+# for when a cached layer is masking a change (e.g. a KG pin bump that
+# `check-pins` confirms but the cached pip-install layer never re-ran).
+# `build-all`'s BUILD_FLAGS override propagates through automatically:
+# GNU Make re-exports a command-line-set variable to every nested $(MAKE).
+rebuild:
+	@$(MAKE) --no-print-directory build BUILD_FLAGS=--no-cache
+
+rebuild-all:
+	@$(MAKE) --no-print-directory build-all BUILD_FLAGS=--no-cache
+
+# Hygiene: dangling images, stopped containers, and (Docker only) build cache
+# left behind by repeated build/rebuild runs. Runs under every runtime
+# installed, not just $(RUNTIME) — mirrors build-all, since Docker's and
+# Apple container's stores accumulate independently of each other. Only
+# removes dangling/stopped resources, never the tagged $(IMAGE_NAME):latest
+# itself — that's what `make clean` is for.
+prune:
+	@if [ "$(HAVE_DOCKER)" = "1" ]; then \
+		echo "==> Pruning Docker: dangling images, stopped containers, build cache ..."; \
+		docker image prune -f; \
+		docker container prune -f; \
+		docker builder prune -f; \
+	else \
+		echo "==> Skipping Docker — not installed."; \
+	fi
+	@if [ "$(HAVE_APPLE)" = "1" ]; then \
+		echo "==> Pruning Apple container: dangling images, stopped containers ..."; \
+		container image prune; \
+		container prune; \
+	else \
+		echo "==> Skipping Apple container — not installed."; \
+	fi
+	@echo "Done. Pruned."
+
 # What `make up` calls. Starting the image server is best-effort: it is an
 # optional backend for one button in the chat UI, so a host that cannot run it
 # gets a note, not a failed `up` with the worker and chat already running.
@@ -385,7 +438,7 @@ setup:
 
 build: check-pins setup
 	@test -d .diarykg || (echo "ERROR: .diarykg/ not found — run 'make build-index' first" && exit 1)
-	container build -f docker/Dockerfile -t $(IMAGE_NAME):latest .
+	container build $(BUILD_FLAGS) -f docker/Dockerfile -t $(IMAGE_NAME):latest .
 	@echo "Done. Image built: $(IMAGE_NAME):latest  (runtime: apple)"
 
 # Idempotent like `compose up`: a running worker is left alone (it takes a
@@ -474,7 +527,7 @@ setup:
 
 build: check-pins setup
 	@test -d .diarykg || (echo "ERROR: .diarykg/ not found — run 'make build-index' first" && exit 1)
-	docker build -f docker/Dockerfile -t $(IMAGE_NAME):latest .
+	docker build $(BUILD_FLAGS) -f docker/Dockerfile -t $(IMAGE_NAME):latest .
 	@echo "Done. Image built: $(IMAGE_NAME):latest  (runtime: docker)"
 
 # docker-compose.yml refers to the image as $(IMAGE_NAME):latest (no registry
