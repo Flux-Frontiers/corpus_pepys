@@ -1463,14 +1463,14 @@ referencing = ">=0.31.0"
 
 [[package]]
 name = "kgmodule-utils"
-version = "0.13.2"
+version = "0.17.0"
 description = "Shared types, graph store, semantic index, and pipeline base for the KGModule SDK"
 optional = false
 python-versions = "<3.14,>=3.12"
 groups = ["main"]
 files = [
-    {file = "kgmodule_utils-0.13.2-py3-none-any.whl", hash = "sha256:379f6a6f47ed3523375a53895fb310830272b6782e057492c4b2b089f5464890"},
-    {file = "kgmodule_utils-0.13.2.tar.gz", hash = "sha256:43d6797f7dec305ee841cd997f4ea0e55de7d04546e15ae6199865bbdf58ea86"},
+    {file = "kgmodule_utils-0.17.0-py3-none-any.whl", hash = "sha256:985c35837669cf63f809d6f823da3790293360240b67363b9705128bf0c57ece"},
+    {file = "kgmodule_utils-0.17.0.tar.gz", hash = "sha256:fb26ecf6e22180aefb2b71802580e0271738d53c75bc5915fe0ec6a182f16fef"},
 ]
 
 [package.dependencies]
@@ -1488,6 +1488,7 @@ torch = {version = ">=2.5.1", optional = true, markers = "extra == \"semantic\""
 transformers = {version = ">=5.5.0,<6", optional = true, markers = "extra == \"semantic\""}
 
 [package.extras]
+ingest = ["firecrawl-anydoc (>=0.1.9)"]
 lancedb = ["lancedb (>=0.19.0)"]
 semantic = ["numpy (>=1.24.0)", "rich (>=13.0.0,<15.0.0)", "sentence-transformers (>=5.4.1)", "sqlite-vec (==0.1.9)", "torch (>=2.5.1)", "transformers (>=5.5.0,<6)"]
 sqlite-vec = ["sqlite-vec (==0.1.9)"]
@@ -1495,6 +1496,7 @@ synthesis = ["httpx (>=0.27.0)", "openai (>=1.30.0)", "pillow (>=10.0.0)"]
 synthesis-mflux = ["httpx (>=0.27.0)", "mflux (>=0.9.0)", "openai (>=1.30.0)", "pillow (>=10.0.0)"]
 viz = ["pyvis (>=0.3.2)"]
 viz3d = ["numpy (>=1.24.0)"]
+viz3d-qt = ["PyQt5 (>=5.15.0)", "numpy (>=1.24.0)", "pyvista (>=0.44.0)", "quiltwright (>=0.6.0)"]
 viz3d-render = ["numpy (>=1.24.0)", "pyvista (>=0.44.0)"]
 
 [[package]]
@@ -4888,4 +4890,4 @@ build = ["diary-kg", "doc-kg"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "783f8cc2ed9c88c08ecb38bf856dc39874054c9878354e26fa864dcc30f54857"
+content-hash = "87c775af9bfaa51ecc30f1e9af83b9a21d2e188ac53ccbe458d2833fa8478faa"

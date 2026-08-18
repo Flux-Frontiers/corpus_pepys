@@ -1,4 +1,4 @@
-.PHONY: help setup install install-dev install-model check-pins build-corpus build-index reindex build build-image build-all pull run stop down logs image-server sdxl-server sdxl-fetch image-server-optional chat chat-container up query serve-llm test lint clean
+.PHONY: help setup install install-dev install-model check-pins bump-pins build-corpus build-index reindex build build-image build-all pull run stop down logs image-server sdxl-server sdxl-fetch image-server-optional chat chat-container up query serve-llm test lint clean
 
 # Bare `make` prints help rather than installing: a cold `make install` pulls
 # torch + the spaCy stack, which is not what a stray keystroke should trigger.
@@ -137,6 +137,7 @@ help:
 	@echo "  make build-index    Full build: ingest + index from $(CORPUS_SOURCE)"
 	@echo "  make reindex        Re-index only (skip ingest, use existing corpus .md files)"
 	@echo "  make check-pins     Verify lock/Dockerfile/compose KG pins agree"
+	@echo "  make bump-pins      Move every KG pin to the latest PyPI release, then re-lock"
 	@echo "  make build          Build the image for the selected runtime"
 	@echo "  make build-all      Build for every runtime installed on this machine"
 	@echo "  make pull           Pull the published image from Docker Hub (no local build needed)"
@@ -195,6 +196,13 @@ install-dev:
 # Dockerfile ARGs; this is what catches that. A prerequisite of build-image.
 check-pins:
 	@poetry run python scripts/check_pins.py
+
+# Move the KG pins as a set to the latest PyPI release: pyproject floors,
+# Dockerfile ARGs, compose args, then `poetry lock`. Deliberately NOT a
+# prerequisite of anything — the pins move when you decide they do, and the
+# new index has to be rebuilt and re-tested afterwards.
+bump-pins:
+	@poetry run python scripts/check_pins.py --bump
 
 # en_core_web_sm is a GitHub-hosted wheel, not a PyPI package, so it cannot be
 # declared as a normal dependency. No-op once present.
