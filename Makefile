@@ -9,7 +9,7 @@
 # Docker / Apple-container image lifecycle (build, run, prune) for serving it.
 # Run `make` or `make help` for the full target list.
 
-.PHONY: help setup install install-dev reinstall-env install-model check-pins bump-pins build-corpus build-index reindex build build-image build-all rebuild rebuild-all prune pull run stop down logs image-server sdxl-server sdxl-fetch image-server-optional chat chat-container up query serve-llm test lint clean
+.PHONY: help setup install install-dev reinstall-env install-model check-pins bump-pins build-corpus build-index reindex build build-image build-all rebuild rebuild-all prune kill pull run stop down logs image-server sdxl-server sdxl-fetch image-server-optional chat chat-container up query serve-llm test lint clean
 
 # Bare `make` prints help rather than installing: a cold `make install` pulls
 # torch + the spaCy stack, which is not what a stray keystroke should trigger.
@@ -160,6 +160,7 @@ help:
 	@echo "  make rebuild        Force a fresh build (--no-cache) for the selected runtime"
 	@echo "  make rebuild-all    Force a fresh build (--no-cache) for every runtime installed"
 	@echo "  make prune          Remove dangling images / stopped containers / build cache"
+	@echo "  make kill           Force-kill worker/chat containers under every runtime installed"
 	@echo "  make pull           Pull the published image from Docker Hub (no local build needed)"
 	@echo "  make run            Start the KGRAG service on http://localhost:8000"
 	@echo "  make up             Worker + chat UI (+ image server where supported)"
@@ -402,6 +403,30 @@ prune:
 		echo "==> Skipping Apple container — not installed."; \
 	fi
 	@echo "Done. Pruned."
+
+# Force-kill the worker + chat containers and the local image-server
+# processes, under every runtime installed — not just $(RUNTIME). Unlike
+# `stop`/`down` (gated to the selected runtime, graceful), this is the "get
+# me back to zero" button: no grace period, no profile/service-name
+# filtering, and it reaches whichever runtime actually has something running
+# regardless of which one is currently selected.
+kill:
+	@if [ "$(HAVE_DOCKER)" = "1" ]; then \
+		echo "==> Killing Docker containers ..."; \
+		$(COMPOSE) --profile chat down --timeout 0 --remove-orphans 2>/dev/null || true; \
+	else \
+		echo "==> Skipping Docker — not installed."; \
+	fi
+	@if [ "$(HAVE_APPLE)" = "1" ]; then \
+		echo "==> Killing Apple containers ..."; \
+		container delete -f $(WORKER_NAME) $(CHAT_NAME) 2>/dev/null || true; \
+	else \
+		echo "==> Skipping Apple container — not installed."; \
+	fi
+	@echo "==> Killing local image-server processes ..."
+	-pkill -f image_server.py 2>/dev/null || true
+	-pkill -f sdxl_server.py 2>/dev/null || true
+	@echo "Done. Killed."
 
 # What `make up` calls. Starting the image server is best-effort: it is an
 # optional backend for one button in the chat UI, so a host that cannot run it
