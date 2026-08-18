@@ -1,3 +1,14 @@
+# corpus_pepys — Samuel Pepys Diary: interactive semantic knowledge graph and
+# KGRAG corpus.
+#
+# Copyright (c) Eric G. Suchanek, PhD <suchanek@mac.com>
+# Licensed under the Elastic License 2.0 (Elastic-2.0). See LICENSE.
+#
+# This Makefile drives the whole local workflow: Poetry env setup, the NLP
+# enrichment + indexing pipeline that builds the DiaryKG corpus, and the
+# Docker / Apple-container image lifecycle (build, run, prune) for serving it.
+# Run `make` or `make help` for the full target list.
+
 .PHONY: help setup install install-dev reinstall-env install-model check-pins bump-pins build-corpus build-index reindex build build-image build-all rebuild rebuild-all prune pull run stop down logs image-server sdxl-server sdxl-fetch image-server-optional chat chat-container up query serve-llm test lint clean
 
 # Bare `make` prints help rather than installing: a cold `make install` pulls
