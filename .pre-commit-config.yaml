@@ -35,7 +35,7 @@ repos:
     hooks:
       - id: ty
         name: ty
-        entry: poetry run ty check docker/
+        entry: .venv/bin/ty check docker/ --python .venv
         language: system
         pass_filenames: false
         always_run: true
