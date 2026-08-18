@@ -1,13 +1,17 @@
 name: Release
 
 # Mirrors the fleet release workflow (gutenberg_kg, doc_kg) with one deliberate
-# difference: there is no build step.
+# difference: there is no build step, and so no `publish` job either.
 #
-# Those repos ship an importable package (`packages = [{ include = ... }]`) and
-# upload a wheel + sdist. corpus_pepys sets `package-mode = false` and has no
-# src/ tree — it ships a corpus and a Docker image, not a distributable — so
-# `poetry build` fails outright with "Building a package is not possible in
-# non-package mode". Do not add it back expecting artifacts.
+# Those repos ship an importable package (`packages = [{ include = ... }]`),
+# build a wheel + sdist, and — as of 2026-08 — publish it to PyPI via trusted
+# publishing (OIDC, `pypa/gh-action-pypi-publish`, a `pypi` environment; see
+# doc_kg/.github/workflows/release.yml for the canonical shape). corpus_pepys
+# sets `package-mode = false` and has no src/ tree — it ships a corpus and a
+# Docker image, not a distributable — so `poetry build` fails outright with
+# "Building a package is not possible in non-package mode", and there is
+# nothing for a publish job to upload. Do not add either step back expecting
+# them to work as-is.
 #
 # The Docker image is published separately (make build-image && docker push);
 # this workflow only cuts the GitHub Release from the tagged commit.
@@ -15,14 +19,15 @@ name: Release
 # PLANNED: corpus_pepys is slated to become a package — docker/*.py moving to
 # src/corpus_pepys/serve/, the Dockerfile switching from loose COPYs to
 # `pip install .`. When that lands, restore the Poetry install + `poetry build`
-# steps and pass `dist/*` to `gh release create`, matching gutenberg_kg exactly.
+# steps and the `publish` job, matching doc_kg exactly (including registering
+# corpus_pepys as a trusted publisher on PyPI first).
 
 on:
   push:
     tags: ['v*']
 
 permissions:
-  contents: write # needed to create GitHub Releases
+  contents: write  # needed to create GitHub Releases
 
 jobs:
   release:
