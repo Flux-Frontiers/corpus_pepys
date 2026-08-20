@@ -277,7 +277,7 @@ works on those hosts instead of merely being skipped.
 
 ---
 
-## [0.5.1] — 2026-08-03
+## [0.5.1] - 2026-08-03
 
 ### Fixed
 - **The chat model picker silently reverted to the provider default.** Neither
@@ -316,7 +316,7 @@ works on those hosts instead of merely being skipped.
 
 ---
 
-## [0.5.0] — 2026-08-03
+## [0.5.0] - 2026-08-03
 
 ### Added
 - **Apple `container` as an alternative runtime** — `make <target> RUNTIME=apple`
@@ -362,7 +362,7 @@ works on those hosts instead of merely being skipped.
 
 ---
 
-## [0.4.0] — 2026-08-03
+## [0.4.0] - 2026-08-03
 
 ### Added
 - **`make check-pins`** (`scripts/check_pins.py`) — verifies the KG versions in
@@ -526,7 +526,7 @@ works on those hosts instead of merely being skipped.
 
 ---
 
-## [0.3.0] — 2026-06-06
+## [0.3.0] - 2026-06-06
 
 ### Added
 - `docker/image_gen.py` (new): image-generation module — `generate()` runs Flux2Klein locally via mflux (Apple Silicon), `generate_via_server()` calls a running mflux-serve HTTP instance, `generate_auto()` picks the right path automatically; `vlm_rewrite()` rewrites corpus prose into a visual scene description via a local VLM before passing it to FLUX
@@ -569,7 +569,7 @@ works on those hosts instead of merely being skipped.
 
 ---
 
-## [0.1.1] — 2026-06-03
+## [0.1.1] - 2026-06-03
 
 ### Added
 - `docs/USER_GUIDE.md`: Non-technical walkthrough of the Pepys chat app — starting it, asking questions, reading passages and relevance bars, sidebar settings, and enabling written answers
@@ -588,7 +588,7 @@ works on those hosts instead of merely being skipped.
 
 ---
 
-## [0.1.0] — 2026-06-02
+## [0.1.0] - 2026-06-02
 
 ### Added
 - `README.md`: Docker Hub fast path as primary quick start — `docker pull` + `docker run`, no build required
