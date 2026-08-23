@@ -70,8 +70,8 @@ RUN pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu 
 # kgmodule-utils>=0.9.0, and these are `==` pins, so a stale one is a hard
 # resolution failure at build time rather than a silent upgrade at runtime.
 ARG KG_RAG_VERSION=0.13.0
-ARG KGMODULE_UTILS_VERSION=0.17.0
-ARG DOC_KG_VERSION=0.21.2
+ARG KGMODULE_UTILS_VERSION=0.18.0
+ARG DOC_KG_VERSION=0.22.0
 ARG DIARY_KG_VERSION=0.97.0
 RUN pip install --no-cache-dir \
     "runpod>=1.7.0" \

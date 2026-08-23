@@ -86,7 +86,7 @@ requires-python = ">=3.12,<3.14"
 dependencies = [
     "fastapi>=0.116.0",
     "httpx>=0.27.0",
-    "kgmodule-utils[synthesis,sqlite-vec]>=0.17.0",
+    "kgmodule-utils[synthesis,sqlite-vec]>=0.18.0",
     "openai>=1.95.0",
     "pillow>=11.0.0",
     "pydantic>=2.8.0",
@@ -120,7 +120,7 @@ dependencies = [
 # its own, and a yanked release would not route around it.
 build = [
     "diary-kg>=0.97.0",
-    "doc-kg>=0.21.2",
+    "doc-kg>=0.22.0",
 ]
 
 [project.urls]
