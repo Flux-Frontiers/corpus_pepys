@@ -821,21 +821,21 @@ word-list = ["pyahocorasick"]
 
 [[package]]
 name = "diary-kg"
-version = "0.97.0"
+version = "0.99.0"
 description = "A knowledge graph builder and semantic search engine for diaries and journals"
 optional = true
 python-versions = "<3.14,>=3.12"
 groups = ["main"]
 markers = "extra == \"build\""
 files = [
-    {file = "diary_kg-0.97.0-py3-none-any.whl", hash = "sha256:398bad39475e2423f8d5c48b76c32be21516fb7732b08ef605981c8e3132e700"},
-    {file = "diary_kg-0.97.0.tar.gz", hash = "sha256:f7712acaee94f8aaa449844dfe079e781cda2108b0a31d6281b52c9be6d2e00c"},
+    {file = "diary_kg-0.99.0-py3-none-any.whl", hash = "sha256:48e0b4f6c36e7f06cc4eb50fe731fb2ffc88ed65e7eccc7a8de83c94e8e007ea"},
+    {file = "diary_kg-0.99.0.tar.gz", hash = "sha256:3f0fb8b25d7d06baaf1ea368f49c377f0d7ea140d781d3511fddbeda14fff907"},
 ]
 
 [package.dependencies]
 click = ">=8.1.0,<9"
-doc-kg = ">=0.21.2"
-kgmodule-utils = ">=0.13.2"
+doc-kg = ">=0.24.1"
+kgmodule-utils = ">=0.20.0"
 mcp = ">=1.0.0,<2"
 numpy = ">=1.24.0"
 pandas = ">=2.0.0"
@@ -873,20 +873,20 @@ files = [
 
 [[package]]
 name = "doc-kg"
-version = "0.22.0"
+version = "0.26.0"
 description = "A tool to build a semantically searchable knowledge graph from markdown and text documents"
 optional = true
 python-versions = "<3.14,>=3.12"
 groups = ["main"]
 markers = "extra == \"build\""
 files = [
-    {file = "doc_kg-0.22.0-py3-none-any.whl", hash = "sha256:9ad50cad83ac37518ff916b44342c72cbb1972034963b3ab4ebbfd21e8361a43"},
-    {file = "doc_kg-0.22.0.tar.gz", hash = "sha256:77ccf66da16dee6c79ce22cebd08d9c27f1ec907f5f9bb32c67f096cb258dcc0"},
+    {file = "doc_kg-0.26.0-py3-none-any.whl", hash = "sha256:0827bed5b18c8f72650fb2b7c823850a49381db4979bcce8905e87e7a0ef14b0"},
+    {file = "doc_kg-0.26.0.tar.gz", hash = "sha256:a7b0968b665c46fe8a8220095f06347f3650f6ee778f29573a5a51233d904c71"},
 ]
 
 [package.dependencies]
 click = ">=8.1.0,<9"
-kgmodule-utils = {version = ">=0.18.0", extras = ["semantic"]}
+kgmodule-utils = {version = ">=0.20.0", extras = ["semantic"]}
 mcp = ">=1.0.0,<2"
 pymupdf4llm = ">=0.0.17"
 pyyaml = ">=6.0.0"
@@ -1461,14 +1461,14 @@ referencing = ">=0.31.0"
 
 [[package]]
 name = "kgmodule-utils"
-version = "0.18.0"
+version = "0.22.0"
 description = "Shared types, graph store, semantic index, and pipeline base for the KGModule SDK"
 optional = false
 python-versions = "<3.14,>=3.12"
 groups = ["main"]
 files = [
-    {file = "kgmodule_utils-0.18.0-py3-none-any.whl", hash = "sha256:230adc9bdeb517867c18d9f357d25f619f66a64aee7fef0ee9a7cc125553a818"},
-    {file = "kgmodule_utils-0.18.0.tar.gz", hash = "sha256:b8b02d1f5397e39d1459b8f05af0ae29b218ea183ad21f2a37b533fbe75725c7"},
+    {file = "kgmodule_utils-0.22.0-py3-none-any.whl", hash = "sha256:407bb0ee4b29d3f9008050e5abb040649bb156ab3ef849c197f884576126bab6"},
+    {file = "kgmodule_utils-0.22.0.tar.gz", hash = "sha256:93af0fdabd907f52ee83d2f9c673882fb7d29c1dc54fd342e315800f17d3e744"},
 ]
 
 [package.dependencies]
@@ -1494,7 +1494,7 @@ synthesis = ["httpx (>=0.27.0)", "openai (>=1.30.0)", "pillow (>=10.0.0)"]
 synthesis-mflux = ["httpx (>=0.27.0)", "mflux (>=0.9.0)", "openai (>=1.30.0)", "pillow (>=10.0.0)"]
 viz = ["pyvis (>=0.3.2)"]
 viz3d = ["numpy (>=1.24.0)"]
-viz3d-qt = ["PyQt5 (>=5.15.0)", "numpy (>=1.24.0)", "pyvista (>=0.44.0)", "quiltwright (>=0.6.0)"]
+viz3d-qt = ["PyQt5 (>=5.15.0)", "numpy (>=1.24.0)", "pyvista (>=0.44.0)", "quiltwright (>=0.14.1)"]
 viz3d-render = ["numpy (>=1.24.0)", "pyvista (>=0.44.0)"]
 
 [[package]]
@@ -4888,4 +4888,4 @@ build = ["diary-kg", "doc-kg"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "a39dc07664981accbd58c46ba790465415ec2835dfc75a2d7b394f4681fff279"
+content-hash = "5a12b9f1695aba65575ba0e820c797758637555b0f2fa83ade5c1c7f7e716363"
