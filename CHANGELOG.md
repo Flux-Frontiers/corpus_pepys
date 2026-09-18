@@ -7,75 +7,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-### Changed
+## [0.6.0] - 2026-09-18
 
-- **`kgmodule-utils` raised to 0.11.0 in both places it is pinned** — the
-  `pyproject.toml` floor and the `docker/Dockerfile` ARG. The fleet published
-  0.11.0 (the shared 3-D layout engine extracted out of `pycode_kg`); this repo
-  was the last on 0.10.0.
-
-  Moving both together is load-bearing here rather than tidiness. This project
-  is `package-mode = false` with no `pip install .` step, so unlike
-  `gutenberg_kg` there is no second resolve to reconcile the two: the ARG is the
-  last word on what the served image installs. Raising only the floor would have
-  left the container on 0.10.0 while the index builder ran 0.11.0 — an index
-  written by one version and opened by another, which is the split
-  `scripts/check_pins.py` exists to catch.
-
-  Nothing here uses the 0.11.0 additions, and the API this repo does use is
-  unchanged: the four `kg_utils.synthesis` factories, `WorkerClient` /
-  `WorkerError` / `handle_aux_ops`, and `SqliteVecBackend` are all still present.
-  The package set is identical across the bump — 155 packages before and after,
-  none added or removed. The only other lock movement is upstream metadata: the
-  `sqlite-vec` marker entries reorder, and a `viz3d = ["numpy (>=1.24.0)"]` extra
-  appears. Neither installs anything, since this repo requests
-  `[synthesis,sqlite-vec]`.
-
-- **Floors raised again to the current fleet releases, in both the
-  `pyproject.toml`/Dockerfile pair `check_pins.py` cross-checks and the two
-  places outside that check:**
-  - `kgmodule-utils`: `>=0.18.0` -> `>=0.22.0` (`pyproject.toml` and the
-    `KGMODULE_UTILS_VERSION` ARG).
-  - `doc-kg`: `>=0.22.0` -> `>=0.26.0` (the `build` extra and
-    `DOC_KG_VERSION`).
-  - `diary-kg`: `>=0.97.0` -> `>=0.99.0` (the `build` extra and
-    `DIARY_KG_VERSION`).
-  - `kg-rag`: `0.13.0` -> `0.15.0` (`KG_RAG_VERSION` only -- it is a
-    container-only dependency, not declared in `pyproject.toml` at all).
-
-  `scripts/check_pins.py` catches a `pyproject.toml`/Dockerfile split for
-  `kgmodule-utils`/`doc-kg`/`diary-kg` but not `kg-rag`, which the container
-  installs with no corresponding local floor to compare against.
-
-
-### Fixed
-
-- **`tests/test_sdxl_server.py` tested the wrong thing.** Its import-deferral
-  check asserted `"torch" not in sys.modules` — global interpreter state, which
-  says nothing about what *this* module imports. It passed here only because
-  torch is absent from this project's test environment, and that absence cannot
-  distinguish "the module does not import torch" from "torch is not installed".
-  The same test failed the moment it ran in `gutenberg_kg`, where torch arrives
-  transitively via doc-kg and other test modules load it first.
-
-  Replaced with a static check: parse the module source and assert no top-level
-  import of torch, diffusers, uvicorn, huggingface_hub or safetensors. Function-
-  level imports are deferred by construction and never appear in `tree.body`;
-  `if TYPE_CHECKING:` blocks are skipped because they do not execute, and a
-  companion test pins that the `TYPE_CHECKING` `import torch` is still present,
-  so the check cannot be satisfied by deleting the type annotation. Verified in
-  both directions with the heavy modules pre-seeded into `sys.modules`: all 44
-  pass with them loaded, and reintroducing a module-scope `import torch` fails
-  the check rather than passing vacuously.
-
-Two passes. First a consistency audit against `gutenberg_kg` — Docker build,
-chat UI, and dependency pins; the two repos serve the same stack from the same
-worker contract, so everywhere they disagreed was either a bug here or a trap
-waiting to become one. Then a runtime pass: Docker is the default and the only
-option most people have, but `make up` broke on any non-Apple host and the docs
-had drifted into presenting the Apple-Silicon setup as the normal one. Then a
-third: porting `gutenberg_kg`'s SDXL-Lightning image server, so image generation
-works on those hosts instead of merely being skipped.
+Three passes. First a consistency audit against `gutenberg_kg` — Docker
+build, chat UI, and dependency pins; the two repos serve the same stack from
+the same worker contract, so everywhere they disagreed was either a bug here
+or a trap waiting to become one. Then a runtime pass: Docker is the default
+and the only option most people have, but `make up` broke on any non-Apple
+host and the docs had drifted into presenting the Apple-Silicon setup as the
+normal one. Then a third: porting `gutenberg_kg`'s SDXL-Lightning image
+server, so image generation works on those hosts instead of merely being
+skipped.
 
 ### Added
 - **`make pull`** — fetches the published image from Docker Hub and retags it
@@ -155,6 +97,43 @@ works on those hosts instead of merely being skipped.
   degradation, the suite goes 57 → 91 tests.
 
 ### Changed
+- **`kgmodule-utils` raised to 0.11.0 in both places it is pinned** — the
+  `pyproject.toml` floor and the `docker/Dockerfile` ARG. The fleet published
+  0.11.0 (the shared 3-D layout engine extracted out of `pycode_kg`); this repo
+  was the last on 0.10.0.
+
+  Moving both together matters more than tidiness here. This project is
+  `package-mode = false` with no `pip install .` step, so unlike
+  `gutenberg_kg` there is no second resolve to reconcile the two: the ARG is the
+  last word on what the served image installs. Raising only the floor would have
+  left the container on 0.10.0 while the index builder ran 0.11.0 — an index
+  written by one version and opened by another, which is the split
+  `scripts/check_pins.py` exists to catch.
+
+  Nothing here uses the 0.11.0 additions, and the API this repo does use is
+  unchanged: the four `kg_utils.synthesis` factories, `WorkerClient` /
+  `WorkerError` / `handle_aux_ops`, and `SqliteVecBackend` are all still present.
+  The package set is identical across the bump — 155 packages before and after,
+  none added or removed. The only other lock movement is upstream metadata: the
+  `sqlite-vec` marker entries reorder, and a `viz3d = ["numpy (>=1.24.0)"]` extra
+  appears. Neither installs anything, since this repo requests
+  `[synthesis,sqlite-vec]`.
+
+- **Floors raised again to the current fleet releases, in both the
+  `pyproject.toml`/Dockerfile pair `check_pins.py` cross-checks and the two
+  places outside that check:**
+  - `kgmodule-utils`: `>=0.18.0` -> `>=0.22.0` (`pyproject.toml` and the
+    `KGMODULE_UTILS_VERSION` ARG).
+  - `doc-kg`: `>=0.22.0` -> `>=0.26.0` (the `build` extra and
+    `DOC_KG_VERSION`).
+  - `diary-kg`: `>=0.97.0` -> `>=0.99.0` (the `build` extra and
+    `DIARY_KG_VERSION`).
+  - `kg-rag`: `0.13.0` -> `0.15.0` (`KG_RAG_VERSION` only -- it is a
+    container-only dependency, not declared in `pyproject.toml` at all).
+
+  `scripts/check_pins.py` catches a `pyproject.toml`/Dockerfile split for
+  `kgmodule-utils`/`doc-kg`/`diary-kg` but not `kg-rag`, which the container
+  installs with no corresponding local floor to compare against.
 - **README quick start** now walks through `git clone` → `make pull` →
   `make up` → `make down` instead of a standalone `docker pull` +
   `docker run`. `docs/API.md` updated to match.
@@ -230,6 +209,23 @@ works on those hosts instead of merely being skipped.
   tracked.
 
 ### Fixed
+- **`tests/test_sdxl_server.py` tested the wrong thing.** Its import-deferral
+  check asserted `"torch" not in sys.modules` — global interpreter state, which
+  says nothing about what *this* module imports. It passed here only because
+  torch is absent from this project's test environment, and that absence cannot
+  distinguish "the module does not import torch" from "torch is not installed".
+  The same test failed the moment it ran in `gutenberg_kg`, where torch arrives
+  transitively via doc-kg and other test modules load it first.
+
+  Replaced with a static check: parse the module source and assert no top-level
+  import of torch, diffusers, uvicorn, huggingface_hub or safetensors. Function-
+  level imports are deferred by construction and never appear in `tree.body`;
+  `if TYPE_CHECKING:` blocks are skipped because they do not execute, and a
+  companion test pins that the `TYPE_CHECKING` `import torch` is still present,
+  so the check cannot be satisfied by deleting the type annotation. Verified in
+  both directions with the heavy modules pre-seeded into `sys.modules`: all 44
+  pass with them loaded, and reintroducing a module-scope `import torch` fails
+  the check rather than passing vacuously.
 - **README/API.md quick start never actually worked.** `docker run -p
   8000:8000 egsuchanek/corpus-pepys:latest` starts the image's default `CMD`
   (`python -u handler.py`), which runs RunPod's serverless poll loop, not an

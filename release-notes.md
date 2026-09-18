@@ -1,43 +1,22 @@
-# Release Notes — v0.5.1
+# Release Notes — v0.6.0
 
-> Released: 2026-08-03
+> Released: 2026-09-18
 
-Two fixes for bugs that shared a failure mode: both were silent. Nothing
-crashed, nothing appeared in a log, and the interface kept showing what you
-expected while something else happened underneath.
+Image generation now works off Apple Silicon, the Docker quick start actually works, and three silent failures are fixed.
 
 ## What changed
 
-**The chat model picker kept its selection.** Choosing a synthesis model and
-then hitting **Refresh models** reverted the picker to the provider default.
-Neither selectbox carried a Streamlit key, so the widget's identity was derived
-from its parameters — and refreshing the model list changed those, which
-Streamlit treats as a different widget and resets.
+**Image generation runs on any host.** A new SDXL-Lightning image server, ported from `gutenberg_kg`, joins the existing mflux backend: `make up` picks SDXL wherever mflux can't run — fast on a GPU, usable on Apple Silicon, working (if slow) on plain CPU. Previously, image generation was silently skipped everywhere but Apple Silicon.
 
-The reset was the visible half. The damaging half was that the sidebar went on
-displaying the default while the query, and the image-prompt rewrite, both used
-it — so answers came back from a model you had not chosen, with nothing to
-indicate the substitution. Both selectboxes now keep their value in session
-state, with the stored choice validated against the current model list before
-the widget renders, so switching provider cannot leave a stale value behind.
+**The Docker path got a full pass.** `make pull` retags the published image so a bare `docker pull` no longer leaves it invisible to `make run`. `docs/DOCKER.md` is new. `make up` no longer takes the whole stack down when it can't build the (optional) image-server dependency on a non-Apple host — search, synthesis and chat all stay up. Apple's `container` runtime memory limits are now based on measured usage rather than guesses, four times smaller than before.
 
-**The Apple runtime's fallback gateway address was wrong.** Containers reach
-host services — the LLM, the image server — over the vmnet gateway, and the
-fallback used when the runtime is not yet running pointed at the wrong subnet.
-It was `192.168.65.1`, which is Docker Desktop's gateway, not the
-`192.168.64.0/24` that macOS's vmnet framework actually allocates.
+**Three bugs were silently discarding real work.** A failed synthesis call used to fail the whole query, discarding search results that had already succeeded — it now returns the results with a `synthesis_error` alongside them. Chat authentication silently rejected every request once `HANDLER_SECRET` was configured, because neither container target forwarded it. And the README's own quick-start command never worked at all: it started the image's default serverless mode instead of the HTTP server `docker compose` actually configures.
 
-Live detection covered the usual case, so this only mattered on a cold start —
-but there too it failed quietly, with the worker unable to reach the LLM and
-answers arriving without synthesis rather than an error.
+**Documentation caught up to the code.** The corpus's chunk count was quoted as two different numbers in two different places; the embedding model description was two migrations out of date; API docs described endpoints and parameters the handler no longer accepts.
 
 ## Upgrading
 
-Nothing is required. Both fixes take effect on the next run; the Docker runtime
-is unaffected by the gateway change.
-
-If you run the chat UI from a container image rather than the host, rebuild it
-to pick up the picker fix — `make build-image` — since the UI is baked in.
+`docker pull egsuchanek/corpus-pepys:latest && make pull` for the published image, or rebuild from source. No config changes required; `IMAGE_BACKEND` auto-selects SDXL where mflux isn't available.
 
 ---
 
