@@ -31,6 +31,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   appears. Neither installs anything, since this repo requests
   `[synthesis,sqlite-vec]`.
 
+- **Floors raised again to the current fleet releases, in both the
+  `pyproject.toml`/Dockerfile pair `check_pins.py` cross-checks and the two
+  places outside that check:**
+  - `kgmodule-utils`: `>=0.18.0` -> `>=0.22.0` (`pyproject.toml` and the
+    `KGMODULE_UTILS_VERSION` ARG).
+  - `doc-kg`: `>=0.22.0` -> `>=0.26.0` (the `build` extra and
+    `DOC_KG_VERSION`).
+  - `diary-kg`: `>=0.97.0` -> `>=0.99.0` (the `build` extra and
+    `DIARY_KG_VERSION`).
+  - `kg-rag`: `0.13.0` -> `0.15.0` (`KG_RAG_VERSION` only -- it is a
+    container-only dependency, not declared in `pyproject.toml` at all).
+
+  `scripts/check_pins.py` catches a `pyproject.toml`/Dockerfile split for
+  `kgmodule-utils`/`doc-kg`/`diary-kg` but not `kg-rag`, which the container
+  installs with no corresponding local floor to compare against.
+
 
 ### Fixed
 
