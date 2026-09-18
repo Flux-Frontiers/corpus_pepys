@@ -8,7 +8,7 @@
 [![Edges](https://img.shields.io/badge/edges-334K-green.svg)](#the-corpus)
 [![Docker](https://img.shields.io/docker/v/egsuchanek/corpus-pepys?label=Docker%20Hub&color=2496ED)](https://hub.docker.com/r/egsuchanek/corpus-pepys)
 [![Poetry](https://img.shields.io/endpoint?url=https://python-poetry.org/badge/v0.json)](https://python-poetry.org/)
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20531929.svg)](https://doi.org/10.5281/zenodo.20531929)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20531928.svg)](https://doi.org/10.5281/zenodo.20531928)
 
 # corpus_pepys
 
@@ -180,8 +180,8 @@ repository** button or [`CITATION.cff`](CITATION.cff):
   year      = {2026},
   publisher = {Zenodo},
   version   = {v0.6.0},
-  doi       = {10.5281/zenodo.20531929},
-  url       = {https://doi.org/10.5281/zenodo.20531929}
+  doi       = {10.5281/zenodo.20531928},
+  url       = {https://doi.org/10.5281/zenodo.20531928}
 }
 ```
 
