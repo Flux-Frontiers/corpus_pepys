@@ -4888,4 +4888,4 @@ build = ["diary-kg", "doc-kg"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "5a12b9f1695aba65575ba0e820c797758637555b0f2fa83ade5c1c7f7e716363"
+content-hash = "ad6f8d8e3374433c31189dd7ffc1ae57386ae6b639d81e01ebef15ede2f23683"

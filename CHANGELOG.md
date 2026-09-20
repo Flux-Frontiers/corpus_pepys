@@ -7,6 +7,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- **`ruff` floor raised from `>=0.4.0` to `>=0.15`**, inside the existing
+  `<0.16` cap (`kgrag_priv` sweep item 49, tier 1). Every fleet lock already
+  installs 0.15, so the old floor meant nothing.
+
 ## [0.6.0] - 2026-09-18
 
 Three passes. First a consistency audit against `gutenberg_kg` — Docker
