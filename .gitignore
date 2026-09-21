@@ -32,7 +32,6 @@ venv/
 env/
 
 # Local install-specific config (not portable)
-.mcp.json
 
 # Logs
 *.log

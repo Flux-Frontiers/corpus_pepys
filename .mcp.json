@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "pepys": {
+      "command": "${HOME}/.local/bin/diarykg-mcp",
+      "args": [
+        "--repo",
+        "."
+      ]
+    }
+  }
+}
