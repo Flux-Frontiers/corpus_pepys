@@ -9,6 +9,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **Fleet dependency floors raised and relocked** (`kgrag_priv` sweep item 46):
+  `kgmodule-utils` to `>=0.23.0`, `doc-kg` to `>=0.27.0`. The three packages released on 2026-09-20 and put
+  every consumer's lock behind them within hours; this is the routine
+  currency bump that follows.
+
 - **`ruff` floor raised from `>=0.4.0` to `>=0.15`**, inside the existing
   `<0.16` cap (`kgrag_priv` sweep item 49, tier 1). Every fleet lock already
   installs 0.15, so the old floor meant nothing.
