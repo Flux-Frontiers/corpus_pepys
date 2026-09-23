@@ -14,6 +14,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   every consumer's lock behind them within hours; this is the routine
   currency bump that follows.
 
+- **Docker image pins moved to the lock's versions** (`kgrag_priv` sweep
+  item 57). The floor raise above left `docker/Dockerfile` at
+  `kgmodule-utils==0.22.0` and `doc-kg==0.26.0` against a lock at 0.23.0 and
+  0.27.0, so `scripts/check_pins.py` failed: an index built by the lock would
+  have been read by older versions in the container. `check_pins.py --bump`
+  now moves the set to the latest releases: `kgmodule-utils` 0.24.0 (floor
+  and ARG), `diary-kg` 0.100.0 (floor and ARG), `doc-kg` 0.27.0 (ARG) and
+  `kg-rag` 0.17.0 (container-only ARG), relocked to match.
+
 - **`ruff` floor raised from `>=0.4.0` to `>=0.15`**, inside the existing
   `<0.16` cap (`kgrag_priv` sweep item 49, tier 1). Every fleet lock already
   installs 0.15, so the old floor meant nothing.
