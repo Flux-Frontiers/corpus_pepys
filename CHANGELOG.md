@@ -7,6 +7,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- **KG pin set moved to diary-kg 0.100.1 and kg-rag 0.17.2** by
+  `scripts/check_pins.py --bump`: the pyproject floor, `poetry.lock` and the
+  `docker/Dockerfile` ARGs. Both releases carry the pymupdf 2.0 PDF fix;
+  neither changes the index, so `.diarykg/` stays valid.
+
 ## [0.7.0] - 2026-10-20
 
 ### Added

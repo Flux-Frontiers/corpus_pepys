@@ -119,7 +119,7 @@ dependencies = [
 # same commit — the container pins with `==`, so it cannot drift upward on
 # its own, and a yanked release would not route around it.
 build = [
-    "diary-kg>=0.100.0",
+    "diary-kg>=0.100.1",
     "doc-kg>=0.28.1",
 ]
 
