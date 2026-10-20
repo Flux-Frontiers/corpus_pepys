@@ -7,6 +7,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-10-20
+
 ### Changed
 
 - **KG pin set moved to diary-kg 0.100.1 and kg-rag 0.17.2** by
