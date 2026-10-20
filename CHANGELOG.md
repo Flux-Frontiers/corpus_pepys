@@ -7,6 +7,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- `make publish-image` builds the image for `linux/amd64` and `linux/arm64`
+  with buildx and pushes one image index to
+  `docker.io/egsuchanek/corpus-pepys:latest`, so the published image runs on
+  x86 as well as Apple Silicon. It reuses `gutenberg_kg`'s
+  `gutenkg-multiarch` builder and leaves the local image alone.
+
 ## [0.7.1] - 2026-10-20
 
 ### Changed

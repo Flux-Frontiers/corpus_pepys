@@ -9,7 +9,7 @@
 # Docker / Apple-container image lifecycle (build, run, prune) for serving it.
 # Run `make` or `make help` for the full target list.
 
-.PHONY: help setup install install-dev reinstall-env install-model check-pins bump-pins build-corpus build-index reindex build build-image build-all rebuild rebuild-all prune kill pull run stop down logs image-server sdxl-server sdxl-fetch image-server-optional chat chat-container up query serve-llm test lint clean
+.PHONY: help setup install install-dev reinstall-env install-model check-pins bump-pins build-corpus build-index reindex build build-image build-all rebuild rebuild-all prune kill pull publish-image run stop down logs image-server sdxl-server sdxl-fetch image-server-optional chat chat-container up query serve-llm test lint clean
 
 # Bare `make` prints help rather than installing: a cold `make install` pulls
 # torch + the spaCy stack, which is not what a stray keystroke should trigger.
@@ -28,6 +28,13 @@ SDXL_SERVER   = http://localhost:8091
 # `make build` (layer cache used); `make rebuild`/`rebuild-all` set this to
 # --no-cache so a stale cached layer can't hide a change.
 BUILD_FLAGS ?=
+
+# Registry image for `make publish-image`. One image index serves Apple
+# Silicon and x86 alike; nothing in it is CPU-specific. The builder is
+# gutenberg_kg's, shared so both corpora reuse one buildx cache.
+REGISTRY_IMAGE ?= docker.io/egsuchanek/corpus-pepys
+PLATFORMS      ?= linux/amd64,linux/arm64
+BUILDX_BUILDER ?= gutenkg-multiarch
 
 # ------------------------------------------------------------------
 # Container runtime — RUNTIME=docker (default) or RUNTIME=apple.
@@ -162,6 +169,7 @@ help:
 	@echo "  make prune          Remove dangling images / stopped containers / build cache"
 	@echo "  make kill           Force-kill worker/chat containers under every runtime installed"
 	@echo "  make pull           Pull the published image from Docker Hub (no local build needed)"
+	@echo "  make publish-image  Build amd64 + arm64 and push to Docker Hub (needs docker login)"
 	@echo "  make run            Start the KGRAG service on http://localhost:8000"
 	@echo "  make up             Worker + chat UI (+ image server where supported)"
 	@echo "  make stop           Stop the service"
@@ -574,6 +582,18 @@ pull:
 	docker pull egsuchanek/corpus-pepys:latest
 	docker tag egsuchanek/corpus-pepys:latest $(IMAGE_NAME):latest
 	@echo "Tagged as $(IMAGE_NAME):latest — ready for 'make run' / 'make up'."
+
+# Multi-platform builds need a docker-container builder; the default `docker`
+# driver cannot push an image index. Created once, reused after. The amd64
+# half runs under emulation on Apple Silicon, so it is the slow one. Pushes
+# only: the local $(IMAGE_NAME):latest is left as `make build` made it.
+publish-image: check-pins setup
+	@test -d .diarykg || (echo "ERROR: .diarykg/ not found — run 'make build-index' first" && exit 1)
+	@docker buildx inspect $(BUILDX_BUILDER) >/dev/null 2>&1 || \
+	  docker buildx create --name $(BUILDX_BUILDER) --driver docker-container >/dev/null
+	docker buildx build --builder $(BUILDX_BUILDER) --platform $(PLATFORMS) \
+	  $(BUILD_FLAGS) -f docker/Dockerfile -t $(REGISTRY_IMAGE):latest --push .
+	@docker buildx imagetools inspect $(REGISTRY_IMAGE):latest | grep -E 'Platform:' | grep -v unknown
 
 run:
 	$(COMPOSE) up -d pepys-worker
