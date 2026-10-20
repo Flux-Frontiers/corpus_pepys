@@ -7,6 +7,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **PDF ingest on a fresh install, and the image pins moved with it.**
+  kgmodule-utils 0.27.0's `[pdf]` resolved to the empty pymupdf4llm 2.0
+  placeholder, leaving no PDF code (kgrag_priv sweep item 86). The KG pin
+  set moves to kgmodule-utils 0.27.1, doc-kg 0.28.1 and kg-rag 0.17.1 in the
+  pyproject floors and `docker/Dockerfile` ARGs, via
+  `scripts/check_pins.py --bump`; the lock takes pymupdf 2.0. The image
+  needs a rebuild to pick this up.
+
 ### Changed
 
 - **Fleet dependency floors raised and relocked** (`kgrag_priv` sweep item 46):
