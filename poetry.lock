@@ -821,15 +821,15 @@ word-list = ["pyahocorasick"]
 
 [[package]]
 name = "diary-kg"
-version = "0.100.0"
+version = "0.100.1"
 description = "A knowledge graph builder and semantic search engine for diaries and journals"
 optional = true
 python-versions = "<3.14,>=3.12"
 groups = ["main"]
 markers = "extra == \"build\""
 files = [
-    {file = "diary_kg-0.100.0-py3-none-any.whl", hash = "sha256:aa4ce8bc4088f97d793c6beea73b04a2607a620abc0417581345599a59bed877"},
-    {file = "diary_kg-0.100.0.tar.gz", hash = "sha256:47966a28ae61e802ca06b90a748374249391a205edb9e88faccd0100259321cf"},
+    {file = "diary_kg-0.100.1-py3-none-any.whl", hash = "sha256:e788a1257f3971cedd85ccd83d372b0ba085f1c10abee212c7b0f2ffd170c5e0"},
+    {file = "diary_kg-0.100.1.tar.gz", hash = "sha256:7f7af6fd16dd9bb95ab5cacd15ed4a59644a051ee2fc479d58ded36e0999eb97"},
 ]
 
 [package.dependencies]
@@ -4913,4 +4913,4 @@ build = ["diary-kg", "doc-kg"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "6f6402fbeac2803a5fa25aa2b894b6bfa74514b372205bea09d4d8c99213309f"
+content-hash = "45db4e064476a986d9cc7b6f8076b04f655e9d2870e2dc9021eae33f020f64dc"
