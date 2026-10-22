@@ -30,7 +30,10 @@ SDXL_SERVER   = http://localhost:8091
 BUILD_FLAGS ?=
 
 # Registry image for `make publish-image`. One image index serves Apple
-# Silicon and x86 alike; nothing in it is CPU-specific. The builder is
+# Silicon and x86 alike; nothing in it is CPU-specific. After the push the
+# target deletes the image it replaced, which Docker Hub would otherwise keep
+# untagged (scripts/prune_hub_image.py; needs DOCKERHUB_USERNAME and
+# DOCKERHUB_TOKEN, and skips with a note without them). The builder is
 # gutenberg_kg's, shared so both corpora reuse one buildx cache.
 REGISTRY_IMAGE ?= docker.io/egsuchanek/corpus-pepys
 PLATFORMS      ?= linux/amd64,linux/arm64
@@ -591,8 +594,10 @@ publish-image: check-pins setup
 	@test -d .diarykg || (echo "ERROR: .diarykg/ not found — run 'make build-index' first" && exit 1)
 	@docker buildx inspect $(BUILDX_BUILDER) >/dev/null 2>&1 || \
 	  docker buildx create --name $(BUILDX_BUILDER) --driver docker-container >/dev/null
+	@OLD=$$(python3 scripts/prune_hub_image.py digest $(REGISTRY_IMAGE):latest); \
 	docker buildx build --builder $(BUILDX_BUILDER) --platform $(PLATFORMS) \
-	  $(BUILD_FLAGS) -f docker/Dockerfile -t $(REGISTRY_IMAGE):latest --push .
+	  $(BUILD_FLAGS) -f docker/Dockerfile -t $(REGISTRY_IMAGE):latest --push . && \
+	python3 scripts/prune_hub_image.py prune $(REGISTRY_IMAGE):latest "$$OLD"
 	@docker buildx imagetools inspect $(REGISTRY_IMAGE):latest | grep -E 'Platform:' | grep -v unknown
 
 run:

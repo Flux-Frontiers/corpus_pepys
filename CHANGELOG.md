@@ -7,6 +7,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **`make publish-image` no longer leaves the replaced image on Docker
+  Hub.** Each push moved `latest` and Docker Hub kept the previous image
+  untagged, with its own copy of the index. The target now records the
+  tag's digest before the push and, after it, deletes that image and its
+  platform and attestation manifests with `scripts/prune_hub_image.py`
+  (shared with gutenberg_kg), through the registry API, which refuses
+  anything still referenced. It needs `DOCKERHUB_USERNAME` and
+  `DOCKERHUB_TOKEN` (a personal access token with Read, Write and Delete);
+  without them the publish succeeds and says the old image was kept.
+
 ### Added
 
 - `make publish-image` builds the image for `linux/amd64` and `linux/arm64`

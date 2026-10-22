@@ -121,6 +121,14 @@ data/pepys_enriched_full.txt   (7,282 enriched chunks)
   egsuchanek/corpus-pepys:latest   on Docker Hub
 ```
 
+`make publish-image` builds both platforms and pushes them. Docker Hub keeps
+the image a push replaces, untagged, so the target then deletes it with
+`scripts/prune_hub_image.py`. That needs a Docker Hub personal access token
+with Read, Write and Delete, in `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN`;
+without them the publish still succeeds and says the old image was kept,
+which can be deleted later under the repository's **Image Management** on
+hub.docker.com.
+
 ---
 
 ## Corpus statistics
