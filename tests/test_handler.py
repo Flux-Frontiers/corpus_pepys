@@ -1,15 +1,48 @@
-"""Unit tests for docker/handler.py — pure helpers and handler dispatch.
+"""Tests for docker/handler.py against a real Pepys-shaped index.
 
-Heavy dependencies (runpod, kg_rag, kg_utils) are stubbed by conftest.py so
-this suite runs without a full KGRAG environment.
+``conftest.py`` builds the index with the real fleet code (doc-kg's
+GraphStore, DiaryKG's metadata stamping, kg_utils' SqliteVecBackend) and a
+deterministic keyword embedder, so every search here runs real sqlite-vec
+cosine ranking and real SQLite hydration. kg_utils is the installed package;
+only the container-only ``runpod`` and ``kg_rag`` are faked. Tests change the
+handler's configuration (its secret, its index path) with ``monkeypatch``,
+and replace a synthesizer only where a test would otherwise call an LLM.
 """
 
 from __future__ import annotations
 
-import sqlite3
-from unittest.mock import MagicMock, patch
-
 import handler  # docker/ is on sys.path via conftest
+import pytest
+from conftest import PEPYS_ENTRIES, PEPYS_INDEX, KeywordEmbedder, cosine
+
+FIRE = PEPYS_ENTRIES[2][3][0]
+PLAGUE = PEPYS_ENTRIES[1][3][0]
+NAVY, DINNER = PEPYS_ENTRIES[0][3]
+
+
+def _call(**inp):
+    return handler.handler({"input": inp})
+
+
+class RecordingSynth:
+    """Stands in for an LLM backend: records the call and answers, or raises."""
+
+    def __init__(self, answer="an answer", error: Exception | None = None):
+        self.answer, self.error, self.calls = answer, error, []
+
+        class _Cfg:
+            @staticmethod
+            def resolved_model():
+                return "recording-model"
+
+        self._cfg = _Cfg()
+
+    def synthesize_rag(self, query, hits, **kwargs):
+        self.calls.append((query, hits, kwargs))
+        if self.error:
+            raise self.error
+        return self.answer
+
 
 # ---------------------------------------------------------------------------
 # _rows_to_hits
@@ -103,388 +136,262 @@ class TestRowsToHits:
 
 
 class TestAttachDiaryFields:
-    def test_empty_hits_does_nothing(self):
-        handler._attach_diary_fields([])  # must not raise
+    def test_hydrates_text_and_the_stamped_timestamp(self):
+        hits = [{"node_id": PEPYS_INDEX["chunk_ids"][FIRE]}]
+        handler._attach_diary_fields(hits)
+        assert hits[0]["content"] == hits[0]["summary"] == FIRE
+        # DiaryKG._enrich_metadata wrote it from the corpus frontmatter.
+        assert hits[0]["timestamp"] == "1666-09-02T08:00"
 
-    def test_none_node_id_skipped_gracefully(self):
-        hits = [{"node_id": None, "content": "", "summary": "", "timestamp": None}]
-        handler._attach_diary_fields(hits)  # must not raise
+    def test_hydrates_several_hits_in_place(self):
+        hits = [{"node_id": PEPYS_INDEX["chunk_ids"][t]} for t in (NAVY, DINNER)]
+        handler._attach_diary_fields(hits)
+        assert [h["content"] for h in hits] == [NAVY, DINNER]
+        assert {h["timestamp"] for h in hits} == {"1660-03-12T08:00"}
 
-    def test_nonexistent_sqlite_path_is_a_no_op(self):
-        hits = [{"node_id": "n1", "content": "", "summary": "", "timestamp": None}]
-        with patch.object(handler, "_PEPYS_SQLITE", handler._PEPYS_SQLITE):
-            handler._attach_diary_fields(hits)  # path doesn't exist → early return
-        assert hits[0]["content"] == ""
-
-    def test_hydrates_content_from_sqlite(self, tmp_path):
-        db = tmp_path / "graph.sqlite"
-        with sqlite3.connect(str(db)) as con:
-            con.execute("CREATE TABLE nodes (id TEXT, text TEXT, timestamp TEXT)")
-            con.execute("INSERT INTO nodes VALUES ('node1', 'some diary text', '1660-01-01')")
-
-        hits = [{"node_id": "node1", "content": "", "summary": "", "timestamp": None}]
-        with patch.object(handler, "_PEPYS_SQLITE", db):
-            handler._attach_diary_fields(hits)
-
-        assert hits[0]["content"] == "some diary text"
-        assert hits[0]["summary"] == "some diary text"
-        assert hits[0]["timestamp"] == "1660-01-01"
-
-    def test_missing_node_leaves_fields_empty(self, tmp_path):
-        db = tmp_path / "graph.sqlite"
-        with sqlite3.connect(str(db)) as con:
-            con.execute("CREATE TABLE nodes (id TEXT, text TEXT, timestamp TEXT)")
-
-        hits = [{"node_id": "no_such_node", "content": "old", "summary": "old", "timestamp": "old"}]
-        with patch.object(handler, "_PEPYS_SQLITE", db):
-            handler._attach_diary_fields(hits)
-
+    def test_unknown_node_leaves_fields_empty(self):
+        hits = [{"node_id": "chunk:nope.md:0000", "content": "old", "timestamp": "old"}]
+        handler._attach_diary_fields(hits)
         assert hits[0]["content"] == ""
         assert hits[0]["timestamp"] is None
 
-    def test_hydrates_multiple_hits(self, tmp_path):
-        db = tmp_path / "graph.sqlite"
-        with sqlite3.connect(str(db)) as con:
-            con.execute("CREATE TABLE nodes (id TEXT, text TEXT, timestamp TEXT)")
-            con.execute("INSERT INTO nodes VALUES ('n1', 'text one', '1660-01-01')")
-            con.execute("INSERT INTO nodes VALUES ('n2', 'text two', '1661-02-02')")
+    def test_no_usable_ids_is_a_no_op(self):
+        handler._attach_diary_fields([])
+        hits = [{"node_id": None, "content": "kept"}]
+        handler._attach_diary_fields(hits)
+        assert hits == [{"node_id": None, "content": "kept"}]
 
-        hits = [
-            {"node_id": "n1", "content": "", "summary": "", "timestamp": None},
-            {"node_id": "n2", "content": "", "summary": "", "timestamp": None},
-        ]
-        with patch.object(handler, "_PEPYS_SQLITE", db):
-            handler._attach_diary_fields(hits)
-
-        assert hits[0]["content"] == "text one"
-        assert hits[1]["content"] == "text two"
+    def test_missing_index_is_a_no_op(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(handler, "_PEPYS_SQLITE", tmp_path / "absent.sqlite")
+        hits = [{"node_id": PEPYS_INDEX["chunk_ids"][FIRE], "content": "kept"}]
+        handler._attach_diary_fields(hits)
+        assert hits[0]["content"] == "kept"
 
 
 # ---------------------------------------------------------------------------
-# _semantic_search
+# _semantic_search -- real sqlite-vec ranking
 # ---------------------------------------------------------------------------
 
 
 class TestSemanticSearch:
-    def test_returns_empty_when_no_store(self):
-        with patch.object(handler, "_PEPYS_STORE", None):
-            assert handler._semantic_search("anything", k=5) == []
+    def test_the_matching_entry_ranks_first(self):
+        hits = handler._semantic_search("the great fire", k=3)
+        assert hits[0]["node_id"] == PEPYS_INDEX["chunk_ids"][FIRE]
+        assert hits[0]["content"] == FIRE
 
-    def test_semantic_floor_discards_low_scoring_set(self):
-        mock_store = MagicMock()
-        mock_store.search.return_value = [{"_distance": 0.9, "id": "low", "kind": "chunk"}]
+    def test_score_is_the_cosine_similarity(self):
+        emb = KeywordEmbedder()
+        expected = cosine(emb.embed_texts(["the great fire"])[0], emb.embed_texts([FIRE])[0])
+        hits = handler._semantic_search("the great fire", k=1)
+        assert hits[0]["score"] == pytest.approx(expected, abs=1e-3)
 
-        with (
-            patch.object(handler, "_PEPYS_STORE", mock_store),
-            patch.object(handler, "_attach_diary_fields"),
-        ):
-            result = handler._semantic_search("test", k=5, semantic_floor=0.5)
+    def test_document_vectors_are_never_returned(self):
+        # Each entry's document node has a vector too, and the fire document
+        # matches "fire" as well as its chunk does; the kind filter drops it.
+        hits = handler._semantic_search("fire burning city", k=10)
+        assert hits and {h["kind"] for h in hits} == {"chunk"}
+        assert not set(PEPYS_INDEX["doc_ids"]) & {h["node_id"] for h in hits}
 
-        assert result == []
+    def test_k_limits_the_result(self):
+        assert len(handler._semantic_search("city", k=2)) == 2
+
+    def test_min_score_drops_weak_hits(self):
+        everything = handler._semantic_search("plague mortality", k=4)
+        strong = handler._semantic_search("plague mortality", k=4, min_score=0.5)
+        assert len(strong) < len(everything)
+        assert [h["node_id"] for h in strong] == [PEPYS_INDEX["chunk_ids"][PLAGUE]]
+
+    def test_semantic_floor_discards_a_weak_set(self):
+        # Nothing in the diary is about the theatre: the best hit is weak.
+        assert handler._semantic_search("the theatre", k=3) != []
+        assert handler._semantic_search("the theatre", k=3, semantic_floor=0.5) == []
+
+    def test_semantic_floor_keeps_a_strong_set(self):
+        assert handler._semantic_search("the great fire", k=3, semantic_floor=0.5)
+
+    def test_no_store_returns_nothing(self, monkeypatch):
+        monkeypatch.setattr(handler, "_PEPYS_STORE", None)
+        assert handler._semantic_search("fire", k=5) == []
 
 
 # ---------------------------------------------------------------------------
-# handler — dispatch
+# Startup
+# ---------------------------------------------------------------------------
+
+
+class TestStartup:
+    def test_the_index_is_registered_with_its_vectors(self):
+        (entry,) = handler._registry.entries
+        assert entry.name == "pepys" and entry.kind.name == "DIARY"
+        assert entry.sqlite_path == handler._PEPYS_SQLITE
+        assert entry.vectors_path == handler._PEPYS_VECTORS
+
+    def test_the_store_opens_with_every_vector(self):
+        assert handler._PEPYS_STORE.count() == PEPYS_INDEX["vectors"]
+
+
+# ---------------------------------------------------------------------------
+# handler -- dispatch
 # ---------------------------------------------------------------------------
 
 
 class TestHandlerDispatch:
-    def _call(self, **kwargs):
-        return handler.handler({"input": kwargs})
+    def test_unauthorized_without_or_with_the_wrong_secret(self, monkeypatch):
+        monkeypatch.setattr(handler, "HANDLER_SECRET", "s3cret")  # pragma: allowlist secret
+        assert _call(query="fire") == {"error": "unauthorized"}
+        wrong = {"secret": "wrong"}  # pragma: allowlist secret
+        assert _call(query="fire", **wrong) == {"error": "unauthorized"}
 
-    # ── secret auth ─────────────────────────────────────────────────────────
+    def test_the_right_secret_searches(self, monkeypatch):
+        monkeypatch.setattr(handler, "HANDLER_SECRET", "s3cret")  # pragma: allowlist secret
+        result = _call(query="the great fire", secret="s3cret")  # pragma: allowlist secret
+        assert result["hits"][0]["content"] == FIRE
 
-    def test_unauthorized_when_secret_missing(self):
-        with patch.object(handler, "HANDLER_SECRET", "s3cret"):
-            result = self._call(query="test")
-        assert result == {"error": "unauthorized"}
+    @pytest.mark.parametrize("inp", [{"query": ""}, {"query": "   "}, {}])
+    def test_a_query_is_required(self, inp):
+        assert handler.handler({"input": inp}) == {"error": "query is required"}
 
-    def test_unauthorized_when_secret_wrong(self):
-        with patch.object(handler, "HANDLER_SECRET", "s3cret"):
-            result = self._call(query="test", secret="wrong")
-        assert result == {"error": "unauthorized"}
-
-    def test_authorized_when_secret_correct(self):
-        with (
-            patch.object(handler, "HANDLER_SECRET", "s3cret"),
-            patch.object(handler, "_PEPYS_STORE", None),
-        ):
-            result = self._call(query="plague", secret="s3cret")
-        assert "error" not in result
-
-    def test_no_secret_required_when_env_unset(self):
-        with (
-            patch.object(handler, "HANDLER_SECRET", ""),
-            patch.object(handler, "_PEPYS_STORE", None),
-        ):
-            result = self._call(query="fire")
-        assert "error" not in result
-
-    # ── query validation ─────────────────────────────────────────────────────
-
-    def test_empty_query_returns_error(self):
-        with patch.object(handler, "HANDLER_SECRET", ""):
-            assert self._call(query="") == {"error": "query is required"}
-
-    def test_whitespace_only_query_returns_error(self):
-        with patch.object(handler, "HANDLER_SECRET", ""):
-            assert self._call(query="   ") == {"error": "query is required"}
-
-    def test_missing_query_key_returns_error(self):
-        with patch.object(handler, "HANDLER_SECRET", ""):
-            result = handler.handler({"input": {}})
-        assert result == {"error": "query is required"}
-
-    # ── corpus validation ────────────────────────────────────────────────────
-
-    def test_unknown_corpus_returns_error(self):
-        with (
-            patch.object(handler, "HANDLER_SECRET", ""),
-            patch.object(handler, "_PEPYS_STORE", None),
-        ):
-            result = self._call(query="test", corpus="books")
-        assert "error" in result
+    def test_unknown_corpus_is_refused(self):
+        result = _call(query="fire", corpus="books")
         assert "books" in result["error"]
 
-    def test_corpus_diary_accepted(self):
-        with (
-            patch.object(handler, "HANDLER_SECRET", ""),
-            patch.object(handler, "_PEPYS_STORE", None),
-        ):
-            result = self._call(query="great fire", corpus="diary")
-        assert "error" not in result
+    @pytest.mark.parametrize("corpus", ["diary", "all"])
+    def test_known_corpora_search_the_diary(self, corpus):
+        result = _call(query="the great fire", corpus=corpus)
+        assert result["corpus"] == corpus
+        assert result["hits"][0]["node_id"] == PEPYS_INDEX["chunk_ids"][FIRE]
 
-    def test_corpus_all_accepted(self):
-        with (
-            patch.object(handler, "HANDLER_SECRET", ""),
-            patch.object(handler, "_PEPYS_STORE", None),
-        ):
-            result = self._call(query="plague", corpus="all")
-        assert "error" not in result
+    def test_response_carries_the_hits(self):
+        result = _call(query="plague in the city", k=2)
+        assert result["query"] == "plague in the city"
+        assert result["kgs_queried"] == 1
+        assert result["total_hits"] == len(result["hits"]) == 2
+        top = result["hits"][0]
+        assert top["kg_name"] == "pepys" and top["kind"] == "chunk"
+        assert top["content"] == PLAGUE and top["timestamp"] == "1665-08-31T08:00"
+        assert top["source_path"] == "entry_0001_chunk_0.md"
+        assert isinstance(result["search_ms"], int)
 
-    # ── response shape ───────────────────────────────────────────────────────
+    def test_min_score_and_semantic_floor_pass_through(self):
+        weak = _call(query="the theatre", semantic_floor=0.5)
+        assert weak["hits"] == [] and weak["total_hits"] == 0
+        strong = _call(query="plague mortality", k=4, min_score=0.5)
+        assert [h["content"] for h in strong["hits"]] == [PLAGUE]
 
-    def test_response_has_required_keys(self):
-        with (
-            patch.object(handler, "HANDLER_SECRET", ""),
-            patch.object(handler, "_PEPYS_STORE", None),
-        ):
-            result = self._call(query="pepys diary")
-        for key in ("query", "corpus", "total_hits", "kgs_queried", "hits", "search_ms"):
-            assert key in result, f"missing key: {key!r}"
-
-    def test_query_echoed_in_response(self):
-        with (
-            patch.object(handler, "HANDLER_SECRET", ""),
-            patch.object(handler, "_PEPYS_STORE", None),
-        ):
-            result = self._call(query="naval office")
-        assert result["query"] == "naval office"
-
-    def test_corpus_echoed_in_response(self):
-        with (
-            patch.object(handler, "HANDLER_SECRET", ""),
-            patch.object(handler, "_PEPYS_STORE", None),
-        ):
-            result = self._call(query="theatre", corpus="diary")
-        assert result["corpus"] == "diary"
-
-    def test_empty_hits_when_no_table(self):
-        with (
-            patch.object(handler, "HANDLER_SECRET", ""),
-            patch.object(handler, "_PEPYS_STORE", None),
-        ):
-            result = self._call(query="anything")
-        assert result["hits"] == []
-        assert result["total_hits"] == 0
-
-    def test_k_zero_clamped_to_one(self):
-        with (
-            patch.object(handler, "HANDLER_SECRET", ""),
-            patch.object(handler, "_PEPYS_STORE", None),
-        ):
-            result = self._call(query="test", k=0)
-        assert "error" not in result
-
-    def test_synthesis_off_by_default(self):
-        with (
-            patch.object(handler, "HANDLER_SECRET", ""),
-            patch.object(handler, "_PEPYS_STORE", None),
-        ):
-            result = self._call(query="test")
-        assert result["synthesis"] is None
-        assert result["synthesis_ms"] is None
-        assert result["model"] is None
-
-    def test_synthesis_called_when_requested(self):
-        with (
-            patch.object(handler, "HANDLER_SECRET", ""),
-            patch.object(handler, "_PEPYS_STORE", None),
-        ):
-            result = self._call(query="fire", synthesize=True)
-        assert result["synthesis"] == "mock synthesis"
-        assert result["synthesis_ms"] is not None
-        assert result["model"] is not None
+    def test_k_below_one_is_clamped(self):
+        assert len(_call(query="city", k=0)["hits"]) == 1
 
 
 # ---------------------------------------------------------------------------
-# _stats  (the "stats" op backing the chat sidebar's live corpus counts)
+# Synthesis -- the one place a fake stands in, for the LLM call
 # ---------------------------------------------------------------------------
 
 
-def _build_index(path, rows, edges=0):
-    """Create a minimal DiaryKG-shaped graph.sqlite for the stats tests."""
-    with sqlite3.connect(str(path)) as con:
-        con.execute("CREATE TABLE nodes (id TEXT, kind TEXT, file_path TEXT)")
-        con.execute("CREATE TABLE edges (src TEXT, rel TEXT, dst TEXT)")
-        con.executemany("INSERT INTO nodes VALUES (?, ?, ?)", rows)
-        con.executemany(
-            "INSERT INTO edges VALUES (?, ?, ?)",
-            [(f"n{i}", "REL", f"n{i + 1}") for i in range(edges)],
+class TestSynthesis:
+    def test_off_by_default(self, monkeypatch):
+        synth = RecordingSynth()
+        monkeypatch.setattr(handler, "_text_synth", synth)
+        result = _call(query="fire")
+        assert result["synthesis"] is None and result["synthesis_error"] is None
+        assert result["synthesis_ms"] is None and result["model"] is None
+        assert synth.calls == []
+
+    def test_gets_the_real_hits_and_the_pepys_prompt(self, monkeypatch):
+        synth = RecordingSynth("The fire began near the bridge.")
+        monkeypatch.setattr(handler, "_text_synth", synth)
+        result = _call(query="the great fire", synthesize=True, k=2)
+        assert result["synthesis"] == "The fire began near the bridge."
+        assert result["synthesis_error"] is None
+        assert result["model"] == "recording-model"
+        ((query, hits, kwargs),) = synth.calls
+        assert query == "the great fire"
+        assert hits[0]["content"] == FIRE  # what the LLM is grounded on
+        assert kwargs["system"] == handler._PEPYS_RAG_SYSTEM
+        assert kwargs["max_k"] == handler.SYNTH_MAX_K
+
+    def test_a_requested_model_is_passed_and_reported(self, monkeypatch):
+        synth = RecordingSynth()
+        monkeypatch.setattr(handler, "_text_synth", synth)
+        result = _call(query="fire", synthesize=True, model="qwen-test")
+        assert synth.calls[0][2]["model"] == "qwen-test"
+        assert result["model"] == "qwen-test"
+
+    def test_a_backend_failure_keeps_the_search(self, monkeypatch):
+        monkeypatch.setattr(
+            handler, "_text_synth", RecordingSynth(error=RuntimeError("connection refused"))
         )
+        result = _call(query="the great fire", synthesize=True)
+        assert result["synthesis"] is None
+        assert result["synthesis_error"] == "RuntimeError: connection refused"
+        assert result["hits"][0]["content"] == FIRE
+        assert result["synthesis_ms"] is not None
+
+    def test_the_real_default_synthesizer_is_configured_from_the_environment(self):
+        from kg_utils.synthesis import TextSynthesizer
+
+        assert isinstance(handler._text_synth, TextSynthesizer)
+
+
+# ---------------------------------------------------------------------------
+# _stats -- the chat sidebar's live corpus counts
+# ---------------------------------------------------------------------------
 
 
 class TestStats:
-    def test_missing_index_reports_error(self, tmp_path):
-        with patch.object(handler, "_PEPYS_SQLITE", tmp_path / "absent.sqlite"):
-            assert handler._stats() == {"error": "index not found"}
-
-    def test_entries_are_distinct_source_files_not_chunk_count(self, tmp_path):
-        # Two chunks per entry across three entries — the distinction the chat
-        # sidebar renders as "N entries · M indexed chunks".
-        db = tmp_path / "graph.sqlite"
-        _build_index(
-            db,
-            [(f"c{i}", "chunk", f"corpus/{i // 2}.md") for i in range(6)],
-            edges=4,
-        )
-        with (
-            patch.object(handler, "_PEPYS_SQLITE", db),
-            patch.object(handler, "_PEPYS_STORE", None),
-        ):
-            stats = handler._stats()
-
-        assert stats["entries"] == 3
-        assert stats["chunks"] == 6
-        assert stats["nodes"] == 6
-        assert stats["edges"] == 4
-
-    def test_non_chunk_nodes_counted_in_nodes_but_not_chunks(self, tmp_path):
-        db = tmp_path / "graph.sqlite"
-        _build_index(
-            db,
-            [
-                ("c1", "chunk", "corpus/1.md"),
-                ("s1", "section", "corpus/1.md"),
-                ("e1", "entity", None),
-            ],
-        )
-        with (
-            patch.object(handler, "_PEPYS_SQLITE", db),
-            patch.object(handler, "_PEPYS_STORE", None),
-        ):
-            stats = handler._stats()
-
-        assert stats["chunks"] == 1
-        assert stats["entries"] == 1
-        assert stats["nodes"] == 3
-
-    def test_vector_count_read_from_open_store(self, tmp_path):
-        db = tmp_path / "graph.sqlite"
-        _build_index(db, [("c1", "chunk", "corpus/1.md")])
-        store = MagicMock()
-        store.count = MagicMock(return_value=7282)
-        with (
-            patch.object(handler, "_PEPYS_SQLITE", db),
-            patch.object(handler, "_PEPYS_STORE", store),
-        ):
-            stats = handler._stats()
-
-        assert stats["vectors"] == 7282
+    def test_counts_come_from_the_served_index(self):
+        stats = handler._stats()
+        assert stats["entries"] == len(PEPYS_ENTRIES)  # distinct diary days
+        assert stats["chunks"] == sum(len(e[3]) for e in PEPYS_ENTRIES)
+        # documents + chunks + the topic node
+        assert stats["nodes"] == len(PEPYS_ENTRIES) + stats["chunks"] + 1
+        assert stats["edges"] == PEPYS_INDEX["edges"]
+        assert stats["vectors"] == PEPYS_INDEX["vectors"]
         assert stats["embed_model"] == handler.EMBED_MODEL
 
-    def test_vectors_zero_when_store_unopened(self, tmp_path):
-        db = tmp_path / "graph.sqlite"
-        _build_index(db, [("c1", "chunk", "corpus/1.md")])
-        with (
-            patch.object(handler, "_PEPYS_SQLITE", db),
-            patch.object(handler, "_PEPYS_STORE", None),
-        ):
-            assert handler._stats()["vectors"] == 0
+    def test_the_stats_op_needs_no_query(self):
+        assert _call(op="stats") == handler._stats()
 
-    def test_corrupt_index_returns_error_not_raise(self, tmp_path):
+    def test_the_stats_op_honours_the_secret(self, monkeypatch):
+        monkeypatch.setattr(handler, "HANDLER_SECRET", "s3cret")  # pragma: allowlist secret
+        assert _call(op="stats") == {"error": "unauthorized"}
+        ok = _call(op="stats", secret="s3cret")  # pragma: allowlist secret
+        assert ok["entries"] == len(PEPYS_ENTRIES)
+
+    def test_vectors_zero_when_the_store_is_unopened(self, monkeypatch):
+        monkeypatch.setattr(handler, "_PEPYS_STORE", None)
+        assert handler._stats()["vectors"] == 0
+
+    def test_missing_index_reports_an_error(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(handler, "_PEPYS_SQLITE", tmp_path / "absent.sqlite")
+        assert handler._stats() == {"error": "index not found"}
+
+    def test_corrupt_index_reports_an_error_not_raise(self, tmp_path, monkeypatch):
         db = tmp_path / "graph.sqlite"
         db.write_text("this is not a sqlite database")
-        with (
-            patch.object(handler, "_PEPYS_SQLITE", db),
-            patch.object(handler, "_PEPYS_STORE", None),
-        ):
-            stats = handler._stats()
-        assert "error" in stats
-
-    def test_handler_dispatches_stats_op_without_a_query(self, tmp_path):
-        db = tmp_path / "graph.sqlite"
-        _build_index(db, [("c1", "chunk", "corpus/1.md")])
-        with (
-            patch.object(handler, "HANDLER_SECRET", ""),
-            patch.object(handler, "_PEPYS_SQLITE", db),
-            patch.object(handler, "_PEPYS_STORE", None),
-        ):
-            result = handler.handler({"input": {"op": "stats"}})
-
-        # Must not fall through to the query path, which would say
-        # "query is required".
-        assert result["entries"] == 1
-        assert "error" not in result
-
-    def test_stats_op_still_honours_handler_secret(self, tmp_path):
-        db = tmp_path / "graph.sqlite"
-        _build_index(db, [("c1", "chunk", "corpus/1.md")])
-        with (
-            patch.object(handler, "HANDLER_SECRET", "s3cret"),
-            patch.object(handler, "_PEPYS_SQLITE", db),
-        ):
-            assert handler.handler({"input": {"op": "stats"}}) == {"error": "unauthorized"}
-            ok = handler.handler({"input": {"op": "stats", "secret": "s3cret"}})
-        assert ok["entries"] == 1
+        monkeypatch.setattr(handler, "_PEPYS_SQLITE", db)
+        assert "error" in handler._stats()
 
 
-class TestSynthesisFailureDegrades:
-    """A failed synthesis must not discard a search that already succeeded."""
+# ---------------------------------------------------------------------------
+# Aux ops go through the real kg_utils.worker
+# ---------------------------------------------------------------------------
 
-    @staticmethod
-    def _call(**inp):
-        return handler.handler({"input": inp})
 
-    def test_backend_failure_reported_not_raised(self):
-        boom = MagicMock(side_effect=RuntimeError("connection refused"))
-        with (
-            patch.object(handler, "HANDLER_SECRET", ""),
-            patch.object(handler, "_PEPYS_STORE", None),
-            patch.object(handler._text_synth, "synthesize_rag", boom),
-        ):
-            result = self._call(query="fire", synthesize=True)
+class TestAuxOps:
+    def test_an_unknown_op_falls_through_to_search(self):
+        result = _call(op="no-such-op", query="the great fire")
+        assert result["hits"][0]["content"] == FIRE
 
-        assert result["synthesis"] is None
-        assert result["synthesis_error"] == "RuntimeError: connection refused"
-        # The search half of the response survives intact.
-        assert "hits" in result
-        assert result["search_ms"] is not None
-        assert result["synthesis_ms"] is not None
+    def test_models_op_is_answered_by_kg_utils_worker(self, monkeypatch):
+        class Listing(RecordingSynth):
+            def list_models(self):
+                return ["m1", "m2"]
 
-    def test_successful_synthesis_leaves_error_none(self):
-        with (
-            patch.object(handler, "HANDLER_SECRET", ""),
-            patch.object(handler, "_PEPYS_STORE", None),
-        ):
-            result = self._call(query="fire", synthesize=True)
-        assert result["synthesis"] == "mock synthesis"
-        assert result["synthesis_error"] is None
+        monkeypatch.setattr(handler, "_text_synth", Listing())
+        assert _call(op="models") == {"models": ["m1", "m2"], "default": "recording-model"}
 
-    def test_key_present_and_none_when_synthesis_not_requested(self):
-        with (
-            patch.object(handler, "HANDLER_SECRET", ""),
-            patch.object(handler, "_PEPYS_STORE", None),
-        ):
-            result = self._call(query="fire")
-        assert result["synthesis_error"] is None
+    def test_rewrite_op_validates_through_kg_utils_worker(self):
+        assert _call(op="rewrite") == {"error": "rewrite requires a non-empty 'text'"}
+
+    def test_imagine_op_validates_through_kg_utils_worker(self):
+        assert _call(op="imagine") == {"error": "imagine requires a non-empty 'prompt'"}

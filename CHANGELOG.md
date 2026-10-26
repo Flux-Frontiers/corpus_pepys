@@ -16,6 +16,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   every MCP server onto `kg_utils.mcp` and `stats()` onto the fleet stats
   shape; none changes the index, so `.diarykg/` stays valid (stats and a
   semantic query on it checked against the new releases).
+- **The handler and chat tests run against a real index**, not stubs.
+  `tests/conftest.py` builds a small Pepys-shaped DiaryKG with doc-kg's
+  `GraphStore`, DiaryKG's metadata stamping and kg_utils' `SqliteVecBackend`
+  (a keyword embedder stands in for the model), and kg_utils is no longer
+  stubbed. Searches now run real sqlite-vec ranking; before, every handler
+  test set the store to `None`, so the query path was only tested with zero
+  hits. chat's worker calls go through the real handler. Only the
+  container-only `runpod` and `kg_rag` are faked, and the image-model and
+  torch tests keep their mocks.
 
 ### Added
 
