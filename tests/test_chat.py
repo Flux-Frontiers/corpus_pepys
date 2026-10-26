@@ -1,16 +1,51 @@
-"""Unit tests for docker/chat.py — synthesis-model filtering and live stats.
+"""Tests for docker/chat.py: synthesis-model filtering and live stats.
 
-streamlit, httpx's transport, and the KGRAG stack are stubbed by conftest.py so
-this suite runs without a browser, a worker, or a full KGRAG environment.
+The worker calls run end to end: :func:`live_worker` answers each ``/runsync``
+POST by calling the real ``handler.handler`` (on the real Pepys-shaped index
+``conftest.py`` builds) and returns a real ``httpx.Response`` in RunPod's
+``{"output": ...}`` envelope. chat.py, kg_utils' ``WorkerClient`` and
+``kg_utils.worker`` all run as installed; the HTTP hop is the only thing
+replaced. An offline worker is a real refused connection.
 """
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
-
 import chat  # docker/ is on sys.path via conftest
+import handler
 import httpx
 import pytest
+from test_handler import RecordingSynth
+
+WORKER = "http://worker:8000"
+
+
+@pytest.fixture(autouse=True)
+def _fresh_streamlit_cache():
+    """``_fetch_models`` and ``_fetch_stats`` are ``st.cache_data``: clear it so
+    one test's worker answer is not another test's."""
+    import streamlit as st
+
+    st.cache_data.clear()
+    yield
+    st.cache_data.clear()
+
+
+@pytest.fixture
+def live_worker(monkeypatch):
+    """Route ``httpx.post`` to the real handler, as the RunPod server would.
+
+    :return: The list of (url, payload) pairs posted, for assertions.
+    """
+    sent: list[tuple[str, dict]] = []
+
+    def post(url, json=None, timeout=None):
+        sent.append((url, json))
+        request = httpx.Request("POST", url, json=json)
+        return httpx.Response(200, json={"output": handler.handler(json)}, request=request)
+
+    monkeypatch.setattr(httpx, "post", post)
+    return sent
+
 
 # ---------------------------------------------------------------------------
 # _is_synth_model
@@ -54,103 +89,80 @@ class TestIsSynthModel:
 
 
 # ---------------------------------------------------------------------------
-# _fetch_models
+# _fetch_models -- through WorkerClient, kg_utils.worker and the handler
 # ---------------------------------------------------------------------------
 
 
 class TestFetchModels:
     @staticmethod
-    def _client(models, default):
-        client = MagicMock()
-        client.list_models = MagicMock(return_value=(models, default))
-        return MagicMock(return_value=client)
+    def _serve(monkeypatch, models, default):
+        class Listing(RecordingSynth):
+            def list_models(self):
+                return models
 
-    def test_blocklisted_models_dropped_from_the_dropdown(self):
-        factory = self._client(["qwen3-4b", "deepseek-r1:8b", "nomic-embed-text"], "qwen3-4b")
-        with patch.object(chat, "WorkerClient", factory):
-            models, default = chat._fetch_models("http://w:8000", "")
-        assert models == ["qwen3-4b"]
-        assert default == "qwen3-4b"
+        synth = Listing()
+        synth._cfg.resolved_model = lambda: default
+        monkeypatch.setattr(handler, "_text_synth", synth)
 
-    def test_blocklisted_default_replaced_with_first_allowed_model(self):
+    def test_blocklisted_models_dropped_from_the_dropdown(self, live_worker, monkeypatch):
+        self._serve(monkeypatch, ["qwen3-4b", "deepseek-r1:8b", "nomic-embed-text"], "qwen3-4b")
+        assert chat._fetch_models(WORKER, "") == (["qwen3-4b"], "qwen3-4b")
+        assert live_worker[0][1]["input"]["op"] == "models"
+
+    def test_blocklisted_default_replaced_with_first_allowed_model(self, live_worker, monkeypatch):
         # oMLX reporting a reasoning model as its default is what put raw
         # chain-of-thought in the answer pane.
-        factory = self._client(["gpt-oss-20b", "qwen3-4b", "llama3.1"], "gpt-oss-20b")
-        with patch.object(chat, "WorkerClient", factory):
-            models, default = chat._fetch_models("http://w:8000", "")
+        self._serve(monkeypatch, ["gpt-oss-20b", "qwen3-4b", "llama3.1"], "gpt-oss-20b")
+        models, default = chat._fetch_models(WORKER, "")
         assert "gpt-oss-20b" not in models
         assert default == "qwen3-4b"
 
-    def test_all_models_blocked_yields_empty_list_and_default(self):
-        factory = self._client(["deepseek-r1", "nomic-embed-text"], "deepseek-r1")
-        with patch.object(chat, "WorkerClient", factory):
-            models, default = chat._fetch_models("http://w:8000", "")
-        assert models == []
-        assert default == ""
+    def test_all_models_blocked_yields_empty_list_and_default(self, live_worker, monkeypatch):
+        self._serve(monkeypatch, ["deepseek-r1", "nomic-embed-text"], "deepseek-r1")
+        assert chat._fetch_models(WORKER, "") == ([], "")
 
-    def test_allowed_default_preserved(self):
-        factory = self._client(["a-model", "b-model"], "b-model")
-        with patch.object(chat, "WorkerClient", factory):
-            _, default = chat._fetch_models("http://w:8000", "")
-        assert default == "b-model"
+    def test_allowed_default_preserved(self, live_worker, monkeypatch):
+        self._serve(monkeypatch, ["a-model", "b-model"], "b-model")
+        assert chat._fetch_models(WORKER, "")[1] == "b-model"
 
 
 # ---------------------------------------------------------------------------
-# _fetch_stats
+# _fetch_stats -- the sidebar's counts, from the real index
 # ---------------------------------------------------------------------------
 
 
 class TestFetchStats:
-    @staticmethod
-    def _post(payload=None, exc=None):
-        def _fake(url, json=None, timeout=None):
-            _fake.sent_url = url
-            _fake.sent = json
-            if exc is not None:
-                raise exc
-            resp = MagicMock()
-            resp.raise_for_status = MagicMock()
-            resp.json = MagicMock(return_value=payload)
-            return resp
+    def test_reports_the_served_index(self, live_worker):
+        stats = chat._fetch_stats(WORKER, "")
+        assert stats == handler._stats()
+        assert stats["entries"] == 3 and stats["chunks"] == 4
 
-        return _fake
+    def test_secret_sent_and_honoured(self, live_worker, monkeypatch):
+        monkeypatch.setattr(handler, "HANDLER_SECRET", "s3cret")  # pragma: allowlist secret
+        assert chat._fetch_stats(WORKER, "s3cret")["entries"] == 3
+        assert live_worker[-1][1]["input"]["secret"] == "s3cret"  # pragma: allowlist secret
+        # Without it the worker says "unauthorized": the sidebar shows
+        # "stats unavailable", not "0 entries".
+        assert chat._fetch_stats(WORKER, "") == {}
+        assert "secret" not in live_worker[-1][1]["input"]
 
-    def test_unwraps_runpod_output_envelope(self):
-        post = self._post({"output": {"entries": 3355, "chunks": 7282}})
-        with patch.object(httpx, "post", post):
-            stats = chat._fetch_stats("http://w:8000", "")
-        assert stats == {"entries": 3355, "chunks": 7282}
-
-    def test_accepts_a_bare_payload_without_the_envelope(self):
-        post = self._post({"entries": 10})
-        with patch.object(httpx, "post", post):
-            assert chat._fetch_stats("http://w:8000", "") == {"entries": 10}
-
-    def test_secret_included_only_when_configured(self):
-        post = self._post({"output": {}})
-        with patch.object(httpx, "post", post):
-            chat._fetch_stats("http://w:8000", "s3cret")
-        assert post.sent["input"]["secret"] == "s3cret"  # pragma: allowlist secret
-
-        post = self._post({"output": {}})
-        with patch.object(httpx, "post", post):
-            chat._fetch_stats("http://w:8000", "")
-        assert "secret" not in post.sent["input"]
+    def test_missing_index_treated_as_unavailable(self, live_worker, monkeypatch, tmp_path):
+        monkeypatch.setattr(handler, "_PEPYS_SQLITE", tmp_path / "absent.sqlite")
+        assert chat._fetch_stats(WORKER, "") == {}
 
     def test_offline_worker_degrades_to_empty_dict(self):
-        post = self._post(exc=httpx.ConnectError("refused"))
-        with patch.object(httpx, "post", post):
-            assert chat._fetch_stats("http://w:8000", "") == {}
+        # Port 9 (discard) is closed: a real refused connection.
+        assert chat._fetch_stats("http://127.0.0.1:9", "") == {}
 
-    def test_worker_error_payload_treated_as_unavailable(self):
-        # An unauthorized or index-missing reply must render "stats
-        # unavailable", not "0 entries · 0 indexed chunks".
-        post = self._post({"output": {"error": "unauthorized"}})
-        with patch.object(httpx, "post", post):
-            assert chat._fetch_stats("http://w:8000", "") == {}
+    def test_accepts_a_bare_payload_without_the_envelope(self, monkeypatch):
+        def post(url, json=None, timeout=None):
+            return httpx.Response(
+                200, json=handler.handler(json), request=httpx.Request("POST", url)
+            )
 
-    def test_trailing_slash_in_endpoint_does_not_double_up(self):
-        post = self._post({"output": {}})
-        with patch.object(httpx, "post", post):
-            chat._fetch_stats("http://w:8000/", "")
-        assert post.sent_url == "http://w:8000/runsync"
+        monkeypatch.setattr(httpx, "post", post)
+        assert chat._fetch_stats(WORKER, "") == handler._stats()
+
+    def test_trailing_slash_in_endpoint_does_not_double_up(self, live_worker):
+        chat._fetch_stats(WORKER + "/", "")
+        assert live_worker[0][0] == WORKER + "/runsync"

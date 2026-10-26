@@ -7,6 +7,27 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- **KG pin set moved to the kgmodule-utils 0.29.0 fleet releases** by
+  `scripts/check_pins.py --bump`: kgmodule-utils 0.29.0, doc-kg 0.29.0 and
+  diary-kg 0.101.0 in the pyproject floors, `poetry.lock` and the
+  `docker/Dockerfile` ARGs, and kg-rag 0.18.0 in the container. They move
+  every MCP server onto `kg_utils.mcp` and `stats()` onto the fleet stats
+  shape; none changes the index, so `.diarykg/` stays valid (stats and a
+  semantic query on it checked against the new releases).
+- **The handler and chat tests run against a real index**, not stubs.
+  `tests/conftest.py` writes a small Pepys-shaped index in diary-kg's layout
+  with kg_utils' real `SqliteVecBackend` (a keyword embedder stands in for the
+  model), and kg_utils is no longer stubbed. `tests/test_index_contract.py`
+  checks that layout against a real `.diarykg` wherever one is built. CI's
+  Test job installs `kgmodule-utils[synthesis,sqlite-vec]` and streamlit,
+  still without torch. Searches now run real sqlite-vec ranking; before, every handler
+  test set the store to `None`, so the query path was only tested with zero
+  hits. chat's worker calls go through the real handler. Only the
+  container-only `runpod` and `kg_rag` are faked, and the image-model and
+  torch tests keep their mocks.
+
 ### Added
 
 - `make publish-image` builds the image for `linux/amd64` and `linux/arm64`
