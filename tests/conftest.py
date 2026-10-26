@@ -8,12 +8,12 @@ The handler is tested against the real stack wherever it is installed:
   ``SqliteVecBackend`` the handler searches are the installed package. A test
   that exercises synthesis swaps in a recording synthesizer at the network
   boundary, never the module.
-- **The index is real.** :func:`build_pepys_index` writes a small diary corpus
-  the way ``diarykg build`` lays it out: frontmatter ``.md`` files under
-  ``.diarykg/corpus/``, the graph through doc-kg's ``GraphStore``, the
-  per-chunk ``timestamp`` through DiaryKG's own ``_enrich_metadata``, and the
-  vectors through kg_utils' ``SqliteVecBackend``. Only the embedding model is
-  replaced, by :class:`KeywordEmbedder`, so nothing is downloaded.
+- **The index is real.** :func:`build_pepys_index` writes a small diary
+  index: ``graph.sqlite`` in diary-kg's column layout (the columns the handler
+  reads, checked against a real build by ``test_index_contract.py``), and
+  ``vectors.sqlite`` through kg_utils' ``SqliteVecBackend``, the class the
+  handler searches with. Only the embedding model is replaced, by
+  :class:`KeywordEmbedder`, so nothing is downloaded and CI needs no torch.
 
 Two modules are faked because they are not installed outside the container
 (``pyproject.toml`` keeps them out on purpose; ``scripts/check_pins.py`` lists
@@ -118,107 +118,77 @@ PEPYS_ENTRIES: list[tuple[str, str, str, list[str]]] = [
 ]
 
 
+#: The diary-kg columns the handler reads. A real ``diarykg build`` writes
+#: more; these are the contract, and ``test_index_contract.py`` checks them
+#: against a real index whenever one is present.
+GRAPH_NODE_COLUMNS = ("id", "kind", "name", "title", "file_path", "text", "timestamp")
+GRAPH_EDGE_COLUMNS = ("src", "rel", "dst")
+VECTOR_META_COLUMNS = ("kind", "name", "title", "file_path")
+
+
 def build_pepys_index(root: Path) -> dict[str, Any]:
     """Write a Pepys-shaped DiaryKG index under ``root/.diarykg``.
+
+    ``graph.sqlite`` gets diary-kg's node and edge columns (document and chunk
+    nodes, CONTAINS and NEXT edges, each chunk stamped with its entry's
+    timestamp, as ``diarykg build`` stamps them from the corpus frontmatter).
+    ``vectors.sqlite`` is written by kg_utils' real ``SqliteVecBackend``, the
+    class the handler searches with.
 
     :param root: Corpus root (what ``PEPYS_KG_ROOT`` names).
     :return: What was written: chunk ids by text, the document ids, the number
         of edges, and the number of vectors.
     """
-    from diary_kg import DiaryKG
-    from doc_kg.dockg import DocEdge, DocNode
-    from doc_kg.store import GraphStore
+    import sqlite3
+
     from kg_utils.vector_backend import SqliteVecBackend
 
     kg_dir = root / ".diarykg"
-    corpus = kg_dir / "corpus"
-    corpus.mkdir(parents=True)
+    kg_dir.mkdir(parents=True)
 
-    nodes: list[DocNode] = []
-    edges: list[DocEdge] = []
+    nodes: list[tuple] = []
+    edges: list[tuple[str, str, str]] = []
     chunk_ids: dict[str, str] = {}
     doc_ids: list[str] = []
-    for fname, ts, category, chunks in PEPYS_ENTRIES:
-        body = "\n\n".join(chunks)
-        (corpus / fname).write_text(
-            f"---\nsource_file: data/pepys.txt\ntimestamp: {ts}\ncategory: {category}\n"
-            f"context: General\n---\n\n{body}\n",
-            encoding="utf-8",
-        )
+    for fname, ts, _category, chunks in PEPYS_ENTRIES:
         doc_id = f"doc:{fname}"
         doc_ids.append(doc_id)
-        nodes.append(
-            DocNode(
-                id=doc_id,
-                kind="document",
-                name=fname,
-                title=None,
-                file_path=fname,
-                char_start=0,
-                char_end=len(body),
-                heading_level=None,
-                text=body,
-            )
-        )
+        nodes.append((doc_id, "document", fname, None, fname, "\n\n".join(chunks), None))
         prev = None
         for i, text in enumerate(chunks):
             cid = f"chunk:{fname}:{i:04d}"
             chunk_ids[text] = cid
-            nodes.append(
-                DocNode(
-                    id=cid,
-                    kind="chunk",
-                    name=f"chunk:{i + 1:04d}",
-                    title=None,
-                    file_path=fname,
-                    char_start=0,
-                    char_end=len(text),
-                    heading_level=None,
-                    text=text,
-                )
-            )
-            edges.append(DocEdge(src=doc_id, rel="CONTAINS", dst=cid))
+            nodes.append((cid, "chunk", f"chunk:{i + 1:04d}", None, fname, text, ts))
+            edges.append((doc_id, "CONTAINS", cid))
             if prev:
-                edges.append(DocEdge(src=prev, rel="NEXT", dst=cid))
+                edges.append((prev, "NEXT", cid))
             prev = cid
     # A non-chunk, non-document node, as the real index has topics and entities.
-    nodes.append(
-        DocNode(
-            id="topic:pepys_public",
-            kind="topic",
-            name="pepys_public",
-            title=None,
-            file_path=None,
-            char_start=None,
-            char_end=None,
-            heading_level=None,
-            text="",
+    nodes.append(("topic:pepys_public", "topic", "pepys_public", None, None, "", None))
+
+    with sqlite3.connect(kg_dir / "graph.sqlite") as con:
+        con.execute(f"CREATE TABLE nodes ({', '.join(GRAPH_NODE_COLUMNS)})")
+        con.execute(f"CREATE TABLE edges ({', '.join(GRAPH_EDGE_COLUMNS)})")
+        con.executemany(
+            f"INSERT INTO nodes VALUES ({', '.join('?' * len(GRAPH_NODE_COLUMNS))})", nodes
         )
-    )
-
-    store = GraphStore(kg_dir / "graph.sqlite")
-    store.write(nodes, edges, wipe=True, quiet=True)
-    store.close()
-
-    # DiaryKG stamps timestamp/category onto chunks from the corpus frontmatter.
-    DiaryKG(root)._enrich_metadata()
+        con.executemany("INSERT INTO edges VALUES (?, ?, ?)", edges)
 
     emb = KeywordEmbedder()
-    rows = []
-    for n in nodes:
-        if n.kind in ("chunk", "document"):
-            rows.append(
-                {
-                    "id": n.id,
-                    "kind": n.kind,
-                    "name": n.name,
-                    "title": n.title,
-                    "file_path": n.file_path,
-                    "vector": emb.embed_texts([n.text or ""])[0],
-                }
-            )
+    rows = [
+        {
+            "id": nid,
+            "kind": kind,
+            "name": name,
+            "title": title,
+            "file_path": fp,
+            "vector": emb.embed_texts([text or ""])[0],
+        }
+        for nid, kind, name, title, fp, text, _ts in nodes
+        if kind in ("chunk", "document")
+    ]
     backend = SqliteVecBackend(
-        kg_dir / "vectors.sqlite", dim=emb.dim, meta_columns=("kind", "name", "title", "file_path")
+        kg_dir / "vectors.sqlite", dim=emb.dim, meta_columns=VECTOR_META_COLUMNS
     )
     backend.open()
     backend.upsert(rows)

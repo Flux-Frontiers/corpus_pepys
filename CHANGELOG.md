@@ -17,10 +17,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   shape; none changes the index, so `.diarykg/` stays valid (stats and a
   semantic query on it checked against the new releases).
 - **The handler and chat tests run against a real index**, not stubs.
-  `tests/conftest.py` builds a small Pepys-shaped DiaryKG with doc-kg's
-  `GraphStore`, DiaryKG's metadata stamping and kg_utils' `SqliteVecBackend`
-  (a keyword embedder stands in for the model), and kg_utils is no longer
-  stubbed. Searches now run real sqlite-vec ranking; before, every handler
+  `tests/conftest.py` writes a small Pepys-shaped index in diary-kg's layout
+  with kg_utils' real `SqliteVecBackend` (a keyword embedder stands in for the
+  model), and kg_utils is no longer stubbed. `tests/test_index_contract.py`
+  checks that layout against a real `.diarykg` wherever one is built. CI's
+  Test job installs `kgmodule-utils[synthesis,sqlite-vec]` and streamlit,
+  still without torch. Searches now run real sqlite-vec ranking; before, every handler
   test set the store to `None`, so the query path was only tested with zero
   hits. chat's worker calls go through the real handler. Only the
   container-only `runpod` and `kg_rag` are faked, and the image-model and

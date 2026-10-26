@@ -1,9 +1,8 @@
 """Tests for docker/handler.py against a real Pepys-shaped index.
 
-``conftest.py`` builds the index with the real fleet code (doc-kg's
-GraphStore, DiaryKG's metadata stamping, kg_utils' SqliteVecBackend) and a
-deterministic keyword embedder, so every search here runs real sqlite-vec
-cosine ranking and real SQLite hydration. kg_utils is the installed package;
+``conftest.py`` builds the index in diary-kg's layout, with kg_utils' real
+SqliteVecBackend and a deterministic keyword embedder, so every search here
+runs real sqlite-vec cosine ranking and real SQLite hydration. kg_utils is the installed package;
 only the container-only ``runpod`` and ``kg_rag`` are faked. Tests change the
 handler's configuration (its secret, its index path) with ``monkeypatch``,
 and replace a synthesizer only where a test would otherwise call an LLM.
@@ -140,7 +139,7 @@ class TestAttachDiaryFields:
         hits = [{"node_id": PEPYS_INDEX["chunk_ids"][FIRE]}]
         handler._attach_diary_fields(hits)
         assert hits[0]["content"] == hits[0]["summary"] == FIRE
-        # DiaryKG._enrich_metadata wrote it from the corpus frontmatter.
+        # The entry's timestamp, as diarykg build stamps it onto each chunk.
         assert hits[0]["timestamp"] == "1666-09-02T08:00"
 
     def test_hydrates_several_hits_in_place(self):
