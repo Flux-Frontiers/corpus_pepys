@@ -7,6 +7,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- **KG pin set moved to the kgmodule-utils 0.29.0 fleet releases** by
+  `scripts/check_pins.py --bump`: kgmodule-utils 0.29.0, doc-kg 0.29.0 and
+  diary-kg 0.101.0 in the pyproject floors, `poetry.lock` and the
+  `docker/Dockerfile` ARGs, and kg-rag 0.18.0 in the container. They move
+  every MCP server onto `kg_utils.mcp` and `stats()` onto the fleet stats
+  shape; none changes the index, so `.diarykg/` stays valid (stats and a
+  semantic query on it checked against the new releases).
+
 ### Added
 
 - `make publish-image` builds the image for `linux/amd64` and `linux/arm64`
