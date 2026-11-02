@@ -53,16 +53,18 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # Tests
-  # Only pytest and httpx are installed: tests/conftest.py stubs runpod, kg_rag,
-  # kg_utils and streamlit into sys.modules at collection time, so the suite
-  # never imports the real KGRAG stack (and never pulls torch into CI).
-  # httpx is real rather than stubbed — it is small and pure-Python, and
-  # tests/test_chat.py asserts on its exception types, which a mock cannot model.
-  # fastapi (with pydantic) likewise: docker/sdxl_server.py declares its request
-  # model with pydantic, and tests/test_sdxl_server.py asserts on those defaults,
-  # which is the contract the worker depends on. Both are already declared
-  # runtime dependencies in pyproject.toml; torch and diffusers are NOT needed,
-  # because sdxl_server defers them until an actual render.
+  # The handler and chat run against a real index and the real kg_utils:
+  # tests/conftest.py writes a small Pepys-shaped index with kg_utils'
+  # SqliteVecBackend and a keyword embedder, and fakes only the container-only
+  # runpod and kg_rag. kgmodule-utils[synthesis,sqlite-vec] is the whole
+  # stack the handler imports (sqlite-vec, httpx, openai, pillow; no torch),
+  # and streamlit is chat.py's UI. fastapi (with pydantic) is real because
+  # docker/sdxl_server.py declares its request model with pydantic, and
+  # tests/test_sdxl_server.py asserts on those defaults. All are declared
+  # runtime dependencies in pyproject.toml; torch, diffusers, doc-kg and
+  # diary-kg are NOT installed: the handler never imports them, and
+  # tests/test_index_contract.py checks the fixture's layout against a real
+  # .diarykg index wherever one is built.
   # ---------------------------------------------------------------------------
   test:
     name: Test
@@ -76,7 +78,9 @@ jobs:
           python-version: "3.12"
 
       - name: Install test deps
-        run: pip install "pytest>=9.0.3" "httpx>=0.27.0" "fastapi>=0.116.0" "pydantic>=2.8.0"
+        run: >-
+          pip install "pytest>=9.0.3" "httpx>=0.27.0" "fastapi>=0.116.0" "pydantic>=2.8.0"
+          "kgmodule-utils[synthesis,sqlite-vec]>=0.29.0" "streamlit>=1.59,<2"
 
       - name: Run tests
         run: pytest
