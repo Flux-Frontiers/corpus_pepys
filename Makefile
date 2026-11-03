@@ -582,8 +582,8 @@ build: check-pins setup
 # `make run`/`make up` — compose would instead try to build it from source
 # (and fail without a local .diarykg/). Retag it locally to close that gap.
 pull:
-	docker pull egsuchanek/corpus-pepys:latest
-	docker tag egsuchanek/corpus-pepys:latest $(IMAGE_NAME):latest
+	docker pull $(REGISTRY_IMAGE):latest
+	docker tag $(REGISTRY_IMAGE):latest $(IMAGE_NAME):latest
 	@echo "Tagged as $(IMAGE_NAME):latest — ready for 'make run' / 'make up'."
 
 # Multi-platform builds need a docker-container builder; the default `docker`
