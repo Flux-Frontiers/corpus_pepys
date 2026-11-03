@@ -86,9 +86,9 @@ requires-python = ">=3.12,<3.14"
 dependencies = [
     "fastapi>=0.116.0",
     "httpx>=0.27.0",
-    "kgmodule-utils[synthesis,sqlite-vec]>=0.29.0",
+    "kgmodule-utils[synthesis,sqlite-vec]>=0.29.2",
     "openai>=1.95.0",
-    "pillow>=11.0.0",
+    "pillow>=13.0.0",
     "pydantic>=2.8.0",
     "PyYAML>=6.0",
     "rich>=14.0.0,<15",

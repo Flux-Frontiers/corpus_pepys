@@ -48,6 +48,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `DOCKERHUB_TOKEN` (a personal access token with Read, Write and Delete);
   without them the publish succeeds and says the old image was kept.
 
+### Security
+
+- **kgmodule-utils 0.29.2 and Pillow 13.0.0 are the floors.**
+  kgmodule-utils 0.29.2 floors Pillow at 13.0.0 in `[synthesis]`, and the
+  direct `pillow>=11.0.0` floor is now `>=13.0.0`, so the index builder
+  cannot resolve Pillow 12.3.0 and its 41 advisories. `check_pins.py --bump`
+  moved the kgmodule-utils floor and the Dockerfile ARG together. The lock
+  refresh (#29) moved Pillow, Streamlit, certifi, filelock, setuptools and
+  virtualenv to patched releases.
+
 ## [0.7.1] - 2026-10-20
 
 ### Changed
