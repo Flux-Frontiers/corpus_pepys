@@ -120,7 +120,7 @@ dependencies = [
 # its own, and a yanked release would not route around it.
 build = [
     "diary-kg>=0.101.0",
-    "doc-kg>=0.29.0",
+    "doc-kg>=0.30.0",
 ]
 
 [project.urls]
