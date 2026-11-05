@@ -7,6 +7,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-11-04
+
 ### Changed
 
 - **doc-kg 0.30.0 and kg-rag 0.18.1, and the index rebuilt on them.**
