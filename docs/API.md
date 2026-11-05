@@ -107,7 +107,7 @@ curl -s -X POST http://localhost:8000/runsync \
   "entries": 3355,
   "chunks": 7282,
   "nodes": 41517,
-  "edges": 333679,
+  "edges": 253352,
   "vectors": 7282,
   "embed_model": "BAAI/bge-small-en-v1.5"
 }

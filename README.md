@@ -5,7 +5,7 @@
 [![Version](https://img.shields.io/badge/version-0.7.1-blue.svg)](https://github.com/Flux-Frontiers/corpus_pepys/releases)
 [![Entries](https://img.shields.io/badge/entries-3%2C355-orange.svg)](#the-corpus)
 [![Nodes](https://img.shields.io/badge/nodes-41.5K-green.svg)](#the-corpus)
-[![Edges](https://img.shields.io/badge/edges-334K-green.svg)](#the-corpus)
+[![Edges](https://img.shields.io/badge/edges-253K-green.svg)](#the-corpus)
 [![Docker](https://img.shields.io/docker/v/egsuchanek/corpus-pepys?label=Docker%20Hub&color=2496ED)](https://hub.docker.com/r/egsuchanek/corpus-pepys)
 [![Poetry](https://img.shields.io/endpoint?url=https://python-poetry.org/badge/v0.json)](https://python-poetry.org/)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20531928.svg)](https://doi.org/10.5281/zenodo.20531928)
@@ -147,7 +147,7 @@ of the Royal Navy.
 | Enriched chunks | 7,282 |
 | Time span | 1660-01-01 → 1669-08-02 |
 | KG nodes | 41,517 |
-| KG edges | 333,679 |
+| KG edges | 253,352 |
 
 ---
 

@@ -6,7 +6,7 @@ abstract: >
   corpus_pepys turns the complete diary of Samuel Pepys (1660–1669) into a
   standalone, queryable semantic knowledge graph. The 3,355 daily entries are
   parsed, NLP-enriched and topic-classified into 7,285 chunks, then indexed as
-  a DiaryKG knowledge graph — 41,517 nodes, 333,679 edges — with a sqlite-vec
+  a DiaryKG knowledge graph — 41,517 nodes, 253,352 edges — with a sqlite-vec
   vector store for sub-second natural-language retrieval. The index is baked
   into a self-contained Docker image and served through the KGRAG federated
   query layer, requiring no index build, model download or network access at

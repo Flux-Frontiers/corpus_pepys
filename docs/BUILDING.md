@@ -146,7 +146,7 @@ hub.docker.com.
 
 The node/edge counts above are from a full build with `SIMILAR_TO` edges. `make
 reindex` runs `diarykg reindex`, which disables them (see the Makefile), giving
-the ~334K edge count quoted in the README. For the live figures of whatever
+the ~253K edge count quoted in the README. For the live figures of whatever
 index is actually being served, ask the worker rather than either table:
 
 ```bash

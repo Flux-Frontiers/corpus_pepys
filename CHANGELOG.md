@@ -9,6 +9,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **doc-kg 0.30.0 and kg-rag 0.18.1, and the index rebuilt on them.**
+  `make bump-pins` moved the doc-kg floor, `poetry.lock` and the
+  Dockerfile's `DOC_KG_VERSION` and `KG_RAG_VERSION`. doc-kg 0.30.0 stores
+  each chunk as the source text it spans, so `make reindex` restored the
+  line breaks in 587 of 18,167 chunks; chunk ids and node counts are
+  unchanged, and four standard queries return the same top five at the
+  same scores. The rebuilt index has no `SIMILAR_TO` edges, as
+  `diarykg reindex` intends; the August build still carried 80,327 of
+  them. Edges go from 333,679 to 253,352 in the README, `CITATION.cff`,
+  `docs/API.md` and `docs/BUILDING.md`.
+
 - **KG pin set moved to the kgmodule-utils 0.29.0 fleet releases** by
   `scripts/check_pins.py --bump`: kgmodule-utils 0.29.0, doc-kg 0.29.0 and
   diary-kg 0.101.0 in the pyproject floors, `poetry.lock` and the
