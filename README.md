@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="https://raw.githubusercontent.com/Flux-Frontiers/corpus_pepys/main/assets/corpuspepys_banner.png" alt="corpus_pepys" width="720"/>
+</p>
+
 [![CI](https://github.com/Flux-Frontiers/corpus_pepys/actions/workflows/ci.yml/badge.svg)](https://github.com/Flux-Frontiers/corpus_pepys/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.12%20%7C%203.13-blue.svg)](https://www.python.org/)
 [![License: Elastic-2.0](https://img.shields.io/badge/License-Elastic%202.0-blue.svg)](https://www.elastic.co/licensing/elastic-license)

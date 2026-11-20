@@ -7,6 +7,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **An Art Techno logo.** The fire: the Great Fire of 1666 drawn as rays
+  rising from a die behind the City's skyline and Old St Paul's dome, with
+  the tagline THE DIARY . 1660 . 1669. `scripts/build_logo.py` draws the mark,
+  a 64 px icon and a banner as SVG under `assets/` and writes the PNGs. The
+  README shows the banner at the top, by absolute raw URL; the painting of
+  Pepys below it stays.
+
 ## [0.7.2] - 2026-11-04
 
 ### Changed
