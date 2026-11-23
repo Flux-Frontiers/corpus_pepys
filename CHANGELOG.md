@@ -7,6 +7,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Security
+
+- **imagewright 0.2.0 is the floor**, in `pyproject.toml` and in the worker
+  image's `docker/Dockerfile`. In imagewright 0.1.0 the `ImageConfig` repr
+  includes `api_key`, so printing or logging a resolved config exposes the
+  OpenAI key. 0.2.0 keeps the key out of the repr.
+
 ## [0.8.0] - 2026-11-23
 
 ### Added
