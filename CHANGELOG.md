@@ -7,6 +7,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-11-23
+
 ### Security
 
 - **imagewright 0.2.0 is the floor**, in `pyproject.toml` and in the worker
