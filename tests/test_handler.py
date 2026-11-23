@@ -330,6 +330,25 @@ class TestSynthesis:
 
         assert isinstance(handler._text_synth, TextSynthesizer)
 
+    def test_the_default_image_synthesizer_is_imagewrights(self):
+        from imagewright import ImageSynthesizer
+
+        assert isinstance(handler._image_synth, ImageSynthesizer)
+
+    def test_an_empty_or_unknown_image_backend_keeps_the_default(self):
+        assert handler._image_for_backend("") is handler._image_synth
+        assert handler._image_for_backend("bogus") is handler._image_synth
+
+    def test_a_named_image_backend_reads_its_own_environment(self, monkeypatch):
+        monkeypatch.setenv("IMAGE_ENDPOINT", "http://tesla:8090")
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        serve = handler._image_for_backend(" MFLUX-SERVE ")
+        openai = handler._image_for_backend("openai")
+        assert serve._cfg.backend.value == "mflux-serve"
+        assert serve._cfg.server_url == "http://tesla:8090"
+        assert openai._cfg.backend.value == "openai"
+        assert openai._cfg.api_key == "sk-test"  # pragma: allowlist secret
+
 
 # ---------------------------------------------------------------------------
 # _stats -- the chat sidebar's live corpus counts

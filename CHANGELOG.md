@@ -16,6 +16,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   README shows the banner at the top, by absolute raw URL; the painting of
   Pepys below it stays.
 
+### Changed
+
+- **The worker's image synthesizer is imagewright's.** `docker/handler.py`
+  builds it with `imagewright.ImageSynthesizer` and resolves a per-request
+  `image_backend` itself, with the same environment variables and fallbacks
+  as before. imagewright is a new dependency, in `pyproject.toml` and the
+  worker image. `kg_utils.synthesis`'s image half is due to be removed from
+  kgmodule-utils.
+
 ## [0.7.2] - 2026-11-04
 
 ### Changed
