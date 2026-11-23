@@ -65,12 +65,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import runpod
-from kg_utils.synthesis import (
-    image_synth_for_backend,
-    image_synthesizer_from_env,
-    text_synth_for_backend,
-    text_synthesizer_from_env,
-)
+from imagewright import ImageBackend, ImageConfig, ImageSynthesizer, image_config_from_env
+from kg_utils.synthesis import text_synth_for_backend, text_synthesizer_from_env
 from kg_utils.worker import handle_aux_ops
 
 # ---------------------------------------------------------------------------
@@ -184,7 +180,7 @@ _open_pepys_store()
 
 print("[startup] initialising synthesis backends ...")
 _text_synth = text_synthesizer_from_env()
-_image_synth = image_synthesizer_from_env()
+_image_synth = ImageSynthesizer(image_config_from_env())
 print("[startup] ready")
 
 
@@ -198,7 +194,18 @@ def _synth_for_backend(backend_str: str):
 
 
 def _image_for_backend(backend_str: str):
-    return image_synth_for_backend(backend_str, _image_synth)
+    try:
+        selected = ImageBackend((backend_str or "").strip().lower())
+    except ValueError:
+        return _image_synth
+    if selected == ImageBackend.OPENAI:
+        api_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("IMAGE_API_KEY") or ""
+        return ImageSynthesizer(ImageConfig(backend=selected, api_key=api_key))
+    if selected == ImageBackend.MFLUX_SERVE:
+        server_url = os.environ.get("IMAGE_ENDPOINT") or ""
+        return ImageSynthesizer(ImageConfig(backend=selected, server_url=server_url))
+    model = os.environ.get("IMAGE_MODEL") or os.environ.get("GUTENKG_IMAGE_MODEL") or ""
+    return ImageSynthesizer(ImageConfig(backend=selected, model=model))
 
 
 # ---------------------------------------------------------------------------

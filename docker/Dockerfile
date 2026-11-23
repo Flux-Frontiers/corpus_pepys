@@ -56,6 +56,7 @@ RUN pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu 
 #         served vectors.sqlite store needs; [synthesis] backs kg_utils.synthesis.
 # doc-kg / diary-kg: DiaryKG index + query API (pull the heavy
 #         torch/sentence-transformers stack transitively).
+# imagewright: the handler's image synthesizer (op: imagine).
 # pillow: chat.py lazily imports PIL to save generated images.
 # streamlit + httpx: chat UI. watchdog: native-event file watching.
 #
@@ -81,6 +82,7 @@ RUN pip install --no-cache-dir \
     "diary-kg==${DIARY_KG_VERSION}" \
     "streamlit>=1.59,<2" \
     "httpx>=0.27.0" \
+    "imagewright>=0.1.0" \
     "watchdog>=6.0.0" \
     "openai>=1.95.0" \
     "pillow>=11.0.0"
