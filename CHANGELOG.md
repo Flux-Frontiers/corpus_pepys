@@ -7,6 +7,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-23
+
 ### Added
 
 - **An Art Techno logo.** The fire: the Great Fire of 1666 drawn as rays
@@ -24,6 +26,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   as before. imagewright is a new dependency, in `pyproject.toml` and the
   worker image. `kg_utils.synthesis`'s image half is due to be removed from
   kgmodule-utils.
+- **KG pins:** kgmodule-utils floor and Dockerfile ARG 0.31.0, kg-rag
+  Dockerfile ARG 0.19.0. kgmodule-utils 0.31.0's `synthesis` extra brings
+  the Anthropic SDK into the lock.
+
+### Fixed
+
+- **CI's Test job installs imagewright.** It installs a hand-picked
+  package list rather than the project, so the handler's new import failed
+  test collection.
 
 ## [0.7.2] - 2026-11-04
 

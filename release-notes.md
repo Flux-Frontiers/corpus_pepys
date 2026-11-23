@@ -1,40 +1,31 @@
-# Release Notes -- v0.7.2
+# Release Notes -- v0.8.0
 
-> Released: 2026-11-04
+> Released: 2026-11-23
 
-This release moves the corpus onto the current fleet stack and rebuilds the
-Pepys index on it. Search results are unchanged; chunk text now keeps the
-diary's own line breaks, and the published image runs on both x86 and
-Apple Silicon.
+This release gives the corpus its own logo and moves the worker's image
+generation onto imagewright, the fleet's image package. Search, synthesis
+and the index are unchanged.
 
 ## What changed
 
-**Current KG stack.** The pins move as a set to kgmodule-utils 0.29.2,
-doc-kg 0.30.0, diary-kg 0.101.0 and, in the container, kg-rag 0.18.1. Every
-MCP server is now on the shared `kg_utils.mcp` base. Pillow is floored at
-13.0.0, which clears the Dependabot advisories against 12.3.0.
+**An Art Techno logo.** The Great Fire of 1666, drawn as rays rising from a
+die behind the City's skyline and Old St Paul's dome. `scripts/build_logo.py`
+draws the mark, an icon and a banner, and the README opens with the banner.
 
-**Index rebuilt.** doc-kg 0.30.0 stores each chunk as the source text it
-spans, so 587 of 18,167 chunks get their paragraph breaks back. Chunk ids
-and node counts are unchanged, and standard queries return the same
-results at the same scores. The rebuilt index carries no `SIMILAR_TO`
-edges, as `make reindex` intends, so the graph has 253,352 edges instead
-of 333,679.
+**Image generation through imagewright.** The worker builds its image
+synthesizer from imagewright instead of kgmodule-utils, and picks a
+per-request image backend with the same environment variables and fallbacks
+as before. kgmodule-utils will drop its copy of the image code in a later
+release; this worker no longer depends on it.
 
-**Real-index tests.** The handler and chat tests run against a small
-Pepys-shaped index written with kg_utils' real sqlite-vec backend instead
-of stubs, and a contract test checks that layout against any built
-`.diarykg`.
-
-**Image publishing.** `make publish-image` builds for `linux/amd64` and
-`linux/arm64` and deletes the image it replaced on Docker Hub, given a
-Docker Hub token with Delete.
+**Current KG stack.** kgmodule-utils moves to 0.31.0 and kg-rag to 0.19.0, in
+the lock and in the worker image.
 
 ## Upgrading
 
-Pull the new image, or run `make reindex` on an existing checkout after
-`poetry install` to rebuild the index on doc-kg 0.30.0. Nothing in the query
-API changes.
+Run `make install` (or `poetry install`) to pick up imagewright and the new
+pins. The published worker image needs a rebuild to include them; until then
+it keeps working on its old pins. The index does not need a rebuild.
 
 ---
 
