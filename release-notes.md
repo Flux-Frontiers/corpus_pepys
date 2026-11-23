@@ -1,31 +1,16 @@
-# Release Notes -- v0.8.0
+# Release Notes -- v0.8.1
 
 > Released: 2026-11-23
 
-This release gives the corpus its own logo and moves the worker's image
-generation onto imagewright, the fleet's image package. Search, synthesis
-and the index are unchanged.
+This is a security release. corpus_pepys now requires imagewright 0.2.0, the release that stops printing the OpenAI API key. Search, synthesis, image generation and the index are unchanged.
 
 ## What changed
 
-**An Art Techno logo.** The Great Fire of 1666, drawn as rays rising from a
-die behind the City's skyline and Old St Paul's dome. `scripts/build_logo.py`
-draws the mark, an icon and a banner, and the README opens with the banner.
-
-**Image generation through imagewright.** The worker builds its image
-synthesizer from imagewright instead of kgmodule-utils, and picks a
-per-request image backend with the same environment variables and fallbacks
-as before. kgmodule-utils will drop its copy of the image code in a later
-release; this worker no longer depends on it.
-
-**Current KG stack.** kgmodule-utils moves to 0.31.0 and kg-rag to 0.19.0, in
-the lock and in the worker image.
+**imagewright 0.2.0 is the floor.** In imagewright 0.1.0, the repr of a resolved `ImageConfig` included `api_key`, so printing or logging the config exposed the OpenAI key. 0.2.0 keeps the key out of the repr. The floor moves in `pyproject.toml` and in the worker image's `docker/Dockerfile`, so a fresh install and a fresh image both get the fixed release.
 
 ## Upgrading
 
-Run `make install` (or `poetry install`) to pick up imagewright and the new
-pins. The published worker image needs a rebuild to include them; until then
-it keeps working on its old pins. The index does not need a rebuild.
+Run `poetry install` to pick up imagewright 0.2.0. Rebuild the worker image (`make build`, or `make publish-image` for Docker Hub) so the container carries it too. If an OpenAI key was printed or logged while you ran 0.1.0, rotate it.
 
 ---
 
