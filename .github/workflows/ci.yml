@@ -58,7 +58,7 @@ jobs:
   # SqliteVecBackend and a keyword embedder, and fakes only the container-only
   # runpod and kg_rag. kgmodule-utils[synthesis,sqlite-vec] is the whole
   # stack the handler imports (sqlite-vec, httpx, openai, pillow; no torch),
-  # and streamlit is chat.py's UI. fastapi (with pydantic) is real because
+  # imagewright is its image synthesizer, and streamlit is chat.py's UI. fastapi (with pydantic) is real because
   # docker/sdxl_server.py declares its request model with pydantic, and
   # tests/test_sdxl_server.py asserts on those defaults. All are declared
   # runtime dependencies in pyproject.toml; torch, diffusers, doc-kg and
@@ -80,7 +80,7 @@ jobs:
       - name: Install test deps
         run: >-
           pip install "pytest>=9.0.3" "httpx>=0.27.0" "fastapi>=0.116.0" "pydantic>=2.8.0"
-          "kgmodule-utils[synthesis,sqlite-vec]>=0.29.0" "streamlit>=1.59,<2"
+          "kgmodule-utils[synthesis,sqlite-vec]>=0.29.0" "imagewright>=0.1.0" "streamlit>=1.59,<2"
 
       - name: Run tests
         run: pytest
