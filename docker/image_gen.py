@@ -1,8 +1,8 @@
 """Image generation — local Flux2Klein via mflux (Apple Silicon only).
 
 Used by image_server.py to keep the model loaded between requests.
-Remote-server and VLM-rewrite paths live in kg_utils.synthesis.ImageSynthesizer
-and kg_utils.synthesis.TextSynthesizer respectively.
+The worker's remote-server path is imagewright.ImageSynthesizer and its
+prompt rewrite is kg_utils.synthesis.TextSynthesizer (both in handler.py).
 
 Environment variables
 ---------------------
